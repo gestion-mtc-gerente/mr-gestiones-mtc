@@ -187,6 +187,23 @@ tr:hover td{background:#FDF9F9}
 @keyframes scanGirar{to{transform:rotate(360deg)}}
 .modal-botones{display:flex; gap:10px; margin-top:18px; flex-wrap:wrap}
 .modal-botones .btn, .modal-botones .btn-sec{flex:1}
+.pap-modal-titulo{font-size:11px; font-weight:800; color:var(--rojo); text-transform:uppercase; letter-spacing:1px; margin-bottom:2px}
+.pap-info-card{background:var(--fondo); border-radius:12px; padding:16px; margin:14px 0}
+.pap-info-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px 16px}
+.pap-info-grid .full{grid-column:1/-1}
+.pap-info-grid .lbl{font-size:10.5px; font-weight:800; color:var(--gris); text-transform:uppercase; letter-spacing:.5px; display:block; margin-bottom:2px}
+.pap-info-grid .val{font-size:14px; font-weight:700; color:var(--texto)}
+.pap-info-grid .val.grande{font-size:17px; color:var(--rojo)}
+.pap-qr-box{text-align:center; background:#fff; border:1px solid var(--borde); border-radius:12px; padding:18px; margin:16px 0}
+.pap-qr-box img{width:170px; height:170px; object-fit:contain; background:#fff; border-radius:8px; padding:6px; border:1px solid var(--borde)}
+.pap-ayuda{font-size:12px; color:var(--gris); margin-top:8px}
+.pap-estado-badge{display:inline-flex; align-items:center; gap:8px; font-weight:900; font-size:15px; letter-spacing:.5px; padding:10px 18px; border-radius:10px}
+.pap-estado-badge.aprobado{background:#E7F7ED; color:var(--verde)}
+.pap-estado-badge.tramite{background:#FFF3E0; color:var(--naranja)}
+.pap-estado-badge.baja{background:#E7F7ED; color:var(--verde)}
+.pap-procesando{text-align:center; padding:30px 10px}
+.pap-comprobante{border:1px solid var(--borde); border-radius:12px; padding:14px; margin-top:12px; background:#fff}
+.pap-comprobante .pap-info-grid{margin-top:10px}
 .doc-item{display:flex; justify-content:space-between; align-items:center; background:var(--fondo); border-radius:8px; padding:8px 12px; margin:6px 0; font-size:13px}
 .hist-item{font-size:12px; padding:6px 0; border-bottom:1px solid var(--fondo); color:var(--gris)}
 .notif{background:#fff; border-left:4px solid var(--rojo); border-radius:10px; padding:12px 14px; margin-bottom:8px; box-shadow:var(--sombra); font-size:13px}
@@ -2441,12 +2458,12 @@ function panelEstados(){
 }
 // Tabla de la consulta oficial escaneada, con las mismas columnas que scppp.mtc.gob.pe.
 // Se usa tanto en la tarjeta interna del gestor como en las consultas que ve el cliente.
-// ---------- Eliminar papeleta: pago por QR + 24h de trámite ----------
-// El portal público no tiene servidor propio (solo lee un archivo que tú exportas), así que el
-// clic del cliente en "Eliminar papeleta" no le llega a nadie automáticamente. Por eso el flujo
-// real es: el cliente paga y manda el comprobante por WhatsApp → tú confirmas el pago DENTRO
-// del sistema (ahí sí queda guardado) → recién ahí arrancan las 24 horas, que se ven reflejadas
-// después en la consulta del cliente cuando publiques el portal de nuevo.
+// ---------- Pago y baja de papeleta: información → QR → número de operación → confirmación → 24h de trámite ----------
+// El portal público no tiene servidor propio, así que la confirmación de pago solo puede
+// registrarla el personal de la gestoría (con su usuario) dentro del sistema, verificando
+// primero el comprobante real del cliente. Una vez confirmado el pago, la papeleta entra a un
+// trámite de baja de 24 horas (temporizador), y recién al cumplirse queda "Dada de baja".
+// El registro nunca se borra: solo cambia de estado, conservando el historial completo.
 const HORAS_ELIMINACION_PAPELETA = 24;
 function fraccionEliminacion(s){
   if (!s.pagoConfirmadoMs) return 0;
@@ -2459,55 +2476,184 @@ function porcentajeVisualEliminacion(s){
   const p = fraccionEliminacion(s);
   return Math.round(100 * (1 - Math.pow(1 - p, 3)));
 }
+function montoPendienteSolicitud(s){
+  return s.papeletas.reduce((a,p) => a + ((catalogo[p.codigo]||{}).m || 0), 0);
+}
+function motivosSolicitud(s){
+  return [...new Set(s.papeletas.map(p => (catalogo[p.codigo]||{}).d || p.codigo))].join("; ");
+}
+function comprobanteBajaHtml(s){
+  return `<div class="elim-pap pap-comprobante" data-id="${s.id}">
+    <span class="pap-estado-badge baja">✓ DADA DE BAJA</span>
+    <div class="pap-info-grid">
+      <div><span class="lbl">N° operación</span><span class="val">${escapa(s.numeroOperacion||"—")}</span></div>
+      <div><span class="lbl">Monto pagado</span><span class="val">${soles(s.montoPagado)}</span></div>
+      <div><span class="lbl">Fecha y hora de la operación</span><span class="val">${escapa(s.fechaAprobacion||"—")}</span></div>
+      <div><span class="lbl">Aprobado por</span><span class="val">${escapa(s.aprobadoPor||"—")}</span></div>
+    </div>
+    <p style="font-size:12px;color:var(--gris);margin-top:10px">La papeleta ha quedado sin efecto y el estado del usuario ha sido actualizado en el sistema.</p>
+  </div>`;
+}
 function bloqueEliminarPapeleta(s, esAdmin){
   if (s.pagoConfirmadoMs){
-    const pct = porcentajeVisualEliminacion(s);
     const listo = fraccionEliminacion(s) >= 1;
+    if (listo) return comprobanteBajaHtml(s);
+    const pct = porcentajeVisualEliminacion(s);
     const restanteMs = Math.max(0, s.pagoConfirmadoMs + HORAS_ELIMINACION_PAPELETA*3600000 - Date.now());
     const h = Math.floor(restanteMs/3600000), m = Math.floor((restanteMs%3600000)/60000);
     return `<div class="elim-pap" data-id="${s.id}" style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--borde)">
-      <span style="font-size:10.5px;color:var(--gris);text-transform:uppercase;letter-spacing:.5px;font-weight:700">Eliminación de papeleta</span>
-      <p style="font-size:13px;margin:6px 0 8px;font-weight:700;color:${listo?"var(--verde)":"var(--rojo-osc)"}">${listo ? "✓ Trámite de eliminación completado." : "⏳ Eliminación en proceso…"}</p>
+      <span class="pap-estado-badge tramite">⏳ Eliminación en proceso</span>
+      <p style="font-size:12px;color:var(--gris);margin:8px 0">N° operación: <b>${escapa(s.numeroOperacion||"—")}</b> · Monto pagado: <b>${soles(s.montoPagado)}</b> · Aprobado por: <b>${escapa(s.aprobadoPor||"—")}</b></p>
       <div style="background:var(--fondo);border-radius:20px;height:10px;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.08)">
         <div class="barra-elim" style="height:100%;border-radius:20px;width:${pct}%;background:linear-gradient(90deg,#F77F00,#FFB066);transition:width 1s linear"></div>
       </div>
-      <p style="font-size:11px;color:var(--gris);margin-top:6px">${listo ? "Ya se cumplieron las 24 horas del trámite." : `Tiempo restante estimado: ${h}h ${m}min`}</p>
+      <p style="font-size:11px;color:var(--gris);margin-top:6px">Tiempo restante estimado: ${h}h ${m}min</p>
     </div>`;
   }
-  const waTexto = encodeURIComponent(`Hola, adjunto el comprobante de pago para eliminar mi papeleta (DNI ${s.dni}).`);
-  const linkWa = EMPRESA.telefono ? `https://wa.me/${EMPRESA.telefono.replace(/\D/g,"")}?text=${waTexto}` : "";
-  const botonConfirmar = esAdmin
-    ? `<button class="btn-sec" style="margin-top:8px;font-size:12px" onclick="confirmarPagoPapeleta('${s.id}')">✅ Confirmar pago recibido (inicia las 24h)</button>`
-    : "";
+  if (!esAdmin) return "";
   return `<div class="elim-pap" data-id="${s.id}" style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--borde)">
-    <button type="button" class="btn-sec" style="font-size:12px" onclick="const d=document.getElementById('qrPago${s.id}'); d.classList.toggle('oculto')">🗑️ Eliminar esta papeleta</button>
-    <div id="qrPago${s.id}" class="oculto" style="margin-top:10px;text-align:center;background:var(--fondo);border-radius:10px;padding:14px">
-      <p style="font-size:12.5px;margin-bottom:10px">Escanea el código y realiza el pago del trámite de eliminación:</p>
-      <img src="${QR_PAGO_PAPELETA}" style="width:160px;height:160px;object-fit:contain;background:#fff;border-radius:8px;padding:6px;border:1px solid var(--borde)">
-      <p style="font-size:11.5px;color:var(--gris);margin-top:10px">Después de pagar, envíanos la constancia de pago${linkWa ? "" : " (contáctanos)"} para iniciar las 24 horas del trámite.</p>
-      ${linkWa ? `<a class="btn" style="display:inline-block;margin-top:8px;font-size:12px;text-decoration:none" href="${linkWa}" target="_blank" rel="noopener">📲 Enviar comprobante por WhatsApp</a>` : ""}
-      ${botonConfirmar}
+    <button type="button" class="btn-sec" style="font-size:12px" onclick="abrirPagoPapeleta('${s.id}')">💳 Pagar y dar de baja</button>
+  </div>`;
+}
+async function abrirPagoPapeleta(id){
+  const s = solicitudes.find(x => x.id === id);
+  if (!s) return;
+  const monto = montoPendienteSolicitud(s);
+  const fechaInfraccion = (s.papeletas[0] && s.papeletas[0].fecha) || s.fechaRegistro;
+  $("zonaModal").innerHTML = `
+  <div class="modal-fondo" onclick="if(event.target===this)cerrarModal()">
+    <div class="modal" style="max-width:460px">
+      <p class="pap-modal-titulo">Pago y baja de papeleta</p>
+      <h2>Información de la papeleta</h2>
+      <div class="pap-info-card">
+        <div class="pap-info-grid">
+          <div><span class="lbl">DNI</span><span class="val grande">${escapa(s.dni)}</span></div>
+          <div><span class="lbl">Nombre completo</span><span class="val">${escapa(s.nombres)} ${escapa(s.apellidos)}</span></div>
+          <div class="full"><span class="lbl">Papeleta(s)</span><span class="val">${s.papeletas.map(p=>escapa(p.codigo)).join(", ")}</span></div>
+          <div class="full"><span class="lbl">Motivo</span><span class="val" style="font-weight:600;font-size:13px">${escapa(motivosSolicitud(s))}</span></div>
+          <div><span class="lbl">Fecha y hora de la infracción</span><span class="val">${escapa(fechaInfraccion)}</span></div>
+          <div><span class="lbl">Monto pendiente</span><span class="val grande">${soles(monto)}</span></div>
+        </div>
+      </div>
+      <p style="font-size:13px;background:#FFF3E0;color:#8a5a00;border-radius:8px;padding:10px 12px;font-weight:600">Estas infracciones serán dadas de baja una vez confirmado el pago.</p>
+      <div id="papQrZona"></div>
+      <div class="modal-botones">
+        <button class="btn-sec" onclick="cerrarModal()">Cancelar</button>
+      </div>
+    </div>
+  </div>`;
+  mostrarCargando("Generando código QR de pago…");
+  await ocultarCargando();
+  pintarQrPago(id);
+}
+function pintarQrPago(id){
+  const zona = $("papQrZona");
+  if (!zona) return;
+  zona.innerHTML = `
+    <div class="pap-qr-box">
+      <img src="${QR_PAGO_PAPELETA}">
+      <p class="pap-ayuda">Escanea el código y realiza el pago del monto pendiente.</p>
+    </div>
+    <label>Número de operación</label>
+    <input id="papNumOp" maxlength="10" inputmode="numeric" placeholder="Ej. 00123456">
+    <p class="pap-ayuda">Ingresa el número de operación que aparece en tu comprobante de pago.</p>
+    <button class="btn" style="width:100%;margin-top:14px" onclick="validarPasoPago('${id}')">PAGAR Y DAR DE BAJA</button>
+    <p class="msg" id="papMsgOp" style="text-align:center;margin-top:8px;font-weight:700;color:var(--rojo)"></p>`;
+}
+function validarPasoPago(id){
+  const num = $("papNumOp").value.trim();
+  if (!/^\d{8,10}$/.test(num)){
+    $("papMsgOp").textContent = "Ingresa un número de operación válido (entre 8 y 10 dígitos).";
+    return;
+  }
+  abrirConfirmacionPago(id, num);
+}
+function abrirConfirmacionPago(id, numeroOperacion){
+  const s = solicitudes.find(x => x.id === id);
+  if (!s) return;
+  const monto = montoPendienteSolicitud(s);
+  $("zonaModal").innerHTML = `
+  <div class="modal-fondo" onclick="if(event.target===this)cerrarModal()">
+    <div class="modal" style="max-width:420px">
+      <h2>¿Confirmar pago y dar de baja la papeleta?</h2>
+      <div class="pap-info-card">
+        <div class="pap-info-grid">
+          <div><span class="lbl">DNI</span><span class="val">${escapa(s.dni)}</span></div>
+          <div><span class="lbl">Papeleta(s)</span><span class="val">${s.papeletas.map(p=>escapa(p.codigo)).join(", ")}</span></div>
+          <div><span class="lbl">Monto</span><span class="val">${soles(monto)}</span></div>
+          <div><span class="lbl">N° operación</span><span class="val">${escapa(numeroOperacion)}</span></div>
+        </div>
+      </div>
+      <p style="font-size:12.5px;color:var(--gris);margin-top:10px">Una vez confirmado el pago, la papeleta será dada de baja y su estado será actualizado automáticamente en el sistema.</p>
+      <div class="modal-botones">
+        <button class="btn-sec" onclick="pintarQrPago('${id}')">CANCELAR</button>
+        <button class="btn" onclick="ejecutarPagoPapeleta('${id}', '${numeroOperacion}')">CONFIRMAR PAGO</button>
+      </div>
     </div>
   </div>`;
 }
-function confirmarPagoPapeleta(id){
+async function ejecutarPagoPapeleta(id, numeroOperacion){
   const s = solicitudes.find(x => x.id === id);
   if (!s) return;
-  if (!confirm("¿Confirmas que ya recibiste el pago del trámite de eliminación? Se iniciará el conteo de 24 horas.")) return;
+  mostrarCargando("Registrando el pago…");
+  const monto = montoPendienteSolicitud(s);
   s.pagoConfirmadoMs = Date.now();
-  s.historial.unshift({ fecha: ahora(), usuario: sesion.nombre, accion: "Confirmó el pago del trámite de eliminación (inicia 24h)" });
+  s.numeroOperacion = numeroOperacion;
+  s.montoPagado = monto;
+  s.aprobadoPor = sesion.nombre + (sesion.cargo ? " — " + sesion.cargo : "");
+  s.fechaAprobacion = ahora();
+  s.papeletas.forEach(p => p.estado = "En trámite de baja");
+  s.historial.unshift({ fecha: ahora(), usuario: sesion.nombre, accion: `Confirmó el pago (N° operación ${numeroOperacion}) e inició la baja de ${s.papeletas.length} papeleta(s)` });
   guarda("mtc_solicitudes", solicitudes);
   guardarSolicitudNube(s);
-  log(`Confirmó pago de eliminación de papeleta · DNI ${s.dni}`);
+  log(`Confirmó pago de papeleta(s) · DNI ${s.dni} · N° operación ${numeroOperacion}`);
+  notificar(`Pago confirmado para DNI ${s.dni}: papeleta(s) en trámite de baja (24h).`);
+  await ocultarCargando();
+  mostrarPagoAprobado(s);
+}
+function mostrarPagoAprobado(s){
+  $("zonaModal").innerHTML = `
+  <div class="modal-fondo" onclick="if(event.target===this)cerrarModalPago()">
+    <div class="modal" style="max-width:420px;text-align:center">
+      <span class="pap-estado-badge aprobado">✓ PAGO APROBADO</span>
+      <div class="pap-info-card" style="text-align:left">
+        <div class="pap-info-grid">
+          <div><span class="lbl">DNI</span><span class="val">${escapa(s.dni)}</span></div>
+          <div><span class="lbl">Nombre</span><span class="val">${escapa(s.nombres)} ${escapa(s.apellidos)}</span></div>
+          <div><span class="lbl">Papeleta(s)</span><span class="val">${s.papeletas.map(p=>escapa(p.codigo)).join(", ")}</span></div>
+          <div><span class="lbl">N° operación</span><span class="val">${escapa(s.numeroOperacion)}</span></div>
+          <div><span class="lbl">Monto pagado</span><span class="val">${soles(s.montoPagado)}</span></div>
+          <div><span class="lbl">Fecha y hora</span><span class="val">${escapa(s.fechaAprobacion)}</span></div>
+          <div class="full"><span class="lbl">Aprobado por</span><span class="val">${escapa(s.aprobadoPor)}</span></div>
+        </div>
+      </div>
+      <p style="font-size:13px;color:var(--gris);margin:12px 0">Pago registrado correctamente. Ahora comienza el trámite de baja de la papeleta, que se completa en 24 horas.</p>
+      <button class="btn" style="width:100%" onclick="cerrarModalPago()">LISTO</button>
+    </div>
+  </div>`;
+}
+function cerrarModalPago(){
+  cerrarModal();
   irVista(vistaActual);
 }
-// Actualiza en vivo (cada minuto) las barras de eliminación visibles, sin recargar toda la vista.
+// Cada minuto: actualiza las barras visibles y, si alguna ya cumplió las 24 horas, la pasa
+// automáticamente a "Dada de baja" (sin borrar el registro, solo cambia su estado).
 setInterval(() => {
+  let cambios = false;
+  solicitudes.forEach(s => {
+    if (s.pagoConfirmadoMs && fraccionEliminacion(s) >= 1 && s.papeletas.some(p => p.estado !== "Dada de baja")){
+      s.papeletas.forEach(p => p.estado = "Dada de baja");
+      guarda("mtc_solicitudes", solicitudes);
+      guardarSolicitudNube(s);
+      cambios = true;
+    }
+  });
   document.querySelectorAll(".elim-pap .barra-elim").forEach(barra => {
     const cont = barra.closest(".elim-pap");
     const s = solicitudes.find(x => x.id === cont.dataset.id);
     if (s) barra.style.width = porcentajeVisualEliminacion(s) + "%";
   });
+  if (cambios && vistaActual === "papeletas") irVista(vistaActual);
 }, 60000);
 function tablaConsultaOficialHtml(co){
   if (!co || !co.filas || !co.filas.length) return "";
@@ -3019,7 +3165,10 @@ function publicarPortal(){
       return { codigo: p.codigo, nivel: c.n || "", puntos: c.p || 0, multa: c.m || 0 };
     }),
     consultaOficial: s.consultaOficial || null,
-    pagoConfirmadoMs: s.pagoConfirmadoMs || null
+    pagoConfirmadoMs: s.pagoConfirmadoMs || null,
+    numeroOperacion: s.numeroOperacion || null,
+    montoPagado: s.montoPagado || null,
+    fechaAprobacion: s.fechaAprobacion || null
   }));
   const publico = { tramites, papeletas: papeletasPub };
   const pesoMB = (JSON.stringify(publico).length / (1024*1024)).toFixed(1);
