@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consulta de Trámite</title>
+<style>
+:root{
+  --rojo:#D62828; --rojo-osc:#A31F1F; --rojo-suave:#FDECEC;
+  --fondo:#F6F4F4; --borde:#E6DEDE; --texto:#292222; --gris:#8B7F7F;
+  --naranja:#F77F00; --verde:#1B9E4B; --azul:#2264D1;
+  --sombra:0 2px 12px rgba(0,0,0,.06);
+}
+*{box-sizing:border-box; margin:0}
+body{font-family:'Segoe UI',system-ui,sans-serif; background:var(--fondo); color:var(--texto); min-height:100vh}
+button{font-family:inherit; cursor:pointer}
+input{font-family:inherit; font-size:15px; width:100%; padding:12px 14px; border:1px solid var(--borde); border-radius:10px; background:#FBFAFA; outline:none}
+input:focus{border-color:var(--rojo)}
+.btn{background:var(--rojo); color:#fff; border:none; border-radius:10px; padding:13px 18px; font-weight:700; font-size:14px; letter-spacing:.5px}
+.btn:hover{background:var(--rojo-osc)}
+.btn-oficial{background:#fff; color:var(--rojo-osc); border:2px solid var(--rojo-osc); border-radius:10px; padding:11px 16px; font-weight:800; font-size:13px; text-decoration:none; display:inline-flex; align-items:center; gap:8px}
+.btn-oficial:hover{background:var(--rojo-suave)}
+header{background:var(--rojo-osc); color:#fff; padding:14px 20px}
+header .marca{font-weight:900; letter-spacing:1px; font-size:16px; display:flex; align-items:center; gap:8px}
+header .marca .tag{background:#fff; color:var(--rojo-osc); font-size:11px; font-weight:900; padding:2px 9px; border-radius:5px; letter-spacing:1px}
+header .sub{font-size:12px; opacity:.85; margin-top:4px}
+.contenedor{max-width:640px; margin:0 auto; padding:28px 18px 60px}
+.card{background:#fff; border:1px solid var(--borde); border-radius:14px; padding:22px; box-shadow:var(--sombra)}
+.card h1{font-size:19px; margin-bottom:4px}
+.card p.desc{font-size:13px; color:var(--gris); margin-bottom:18px}
+.fila-busqueda{display:flex; gap:10px}
+.fila-busqueda input{flex:1}
+#resultados{margin-top:22px}
+.tramite-card{border:1px solid var(--borde); border-radius:12px; padding:16px; margin-bottom:12px; border-left:5px solid var(--gris)}
+.tramite-card .top{display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap}
+.tramite-card .tipo{font-weight:800; font-size:15px}
+.tramite-card .meta{font-size:12px; color:var(--gris); margin-top:4px}
+.estado{display:inline-block; padding:5px 12px; border-radius:20px; font-size:11px; font-weight:800; letter-spacing:.5px; color:#fff; white-space:nowrap}
+.e-tramite{background:var(--naranja)} .e-aprobado{background:var(--verde)}
+.e-observado{background:var(--rojo)} .e-finalizado{background:var(--azul)}
+.msg{font-size:13px; font-weight:700; margin-top:14px; text-align:center}
+.aviso{font-size:12px; color:var(--gris); text-align:center; margin-top:26px; line-height:1.6}
+.oficial-box{border:1px dashed var(--borde); border-radius:12px; padding:16px; margin-top:22px; text-align:center}
+.oficial-box p{font-size:12.5px; color:var(--gris); margin-bottom:12px}
+.oculto{display:none!important}
+
+/* ===== BARRA DE CARGA ANIMADA (trámite en proceso) ===== */
+.carga-box{margin-top:12px}
+.carga-box .txt{font-size:11px; color:var(--gris); font-weight:700; margin-bottom:6px; display:flex; align-items:center; gap:6px}
+.carga-barra{height:10px; border-radius:20px; background:var(--fondo); overflow:hidden; box-shadow:inset 0 1px 2px rgba(0,0,0,.08)}
+.carga-barra .relleno{height:100%; border-radius:20px; width:0%;
+  background:linear-gradient(90deg,#F77F00,#FFB066,#F77F00); background-size:200% 100%;
+  animation:cargaAvance 7s ease-in-out infinite, cargaBrillo 1.6s linear infinite}
+@keyframes cargaAvance{
+  0%{width:3%}
+  75%{width:90%}
+  100%{width:3%}
+}
+@keyframes cargaBrillo{
+  0%{background-position:0% 0}
+  100%{background-position:200% 0}
+}
+
+/* ===== PANEL ESTILO CONSULTA MTC ===== */
+.panel-mtc{border:1px solid var(--borde); border-radius:12px; padding:18px 18px 8px; margin-bottom:14px; background:#fff}
+.panel-mtc h2{font-size:13px; font-weight:800; letter-spacing:.5px; color:var(--rojo-osc); text-transform:uppercase; margin-bottom:14px}
+.panel-mtc .grid{display:grid; grid-template-columns:1fr 1fr; gap:14px 18px}
+@media(max-width:480px){.panel-mtc .grid{grid-template-columns:1fr}}
+.campo-mtc{border-bottom:1px solid var(--fondo); padding-bottom:8px}
+.campo-mtc .et{font-size:10.5px; color:var(--gris); text-transform:uppercase; letter-spacing:.5px; font-weight:700}
+.campo-mtc .val{font-size:14px; font-weight:600; margin-top:3px}
+
+/* ===== DOCUMENTOS SUBIDOS POR LA OFICINA ===== */
+.docs-box{margin-top:12px; padding-top:12px; border-top:1px dashed var(--borde)}
+.docs-box .et{font-size:10.5px; color:var(--gris); text-transform:uppercase; letter-spacing:.5px; font-weight:700; margin-bottom:8px; display:block}
+.doc-link{display:flex; align-items:center; gap:10px; background:var(--rojo-suave); border:1px solid var(--borde); border-radius:10px; padding:10px 12px; margin-bottom:8px; text-decoration:none; color:var(--texto)}
+.doc-link:hover{background:#fbdada}
+.doc-link .ic{font-size:20px}
+.doc-link .nom{font-size:13px; font-weight:700; word-break:break-all}
+.doc-link .accion{margin-left:auto; font-size:11px; font-weight:800; color:var(--rojo-osc); white-space:nowrap}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="marca" id="marcaHeader"><span class="tag">MTC</span> MR GESTIONES</div>
+  <div class="sub">Gestión y asesoría de trámites — empresa privada, no somos una entidad del Estado</div>
+</header>
+
+<div class="contenedor">
+  <div class="card">
+    <h1>Consulta de trámite</h1>
+    <p class="desc">Ingresa tu DNI para ver el estado de tu trámite de licencia gestionado con nosotros.</p>
+    <div class="fila-busqueda">
+      <input id="dni" maxlength="8" inputmode="numeric" placeholder="Tu número de DNI" onkeydown="if(event.key==='Enter')buscar()">
+      <button class="btn" onclick="buscar()">BUSCAR</button>
+    </div>
+    <p class="msg" id="msg"></p>
+    <div id="resultados"></div>
+
+    <div class="oficial-box">
+      <p>¿Quieres verificar tu licencia directamente en el registro oficial del Estado Peruano?</p>
+      <a class="btn-oficial" href="https://licencias.mtc.gob.pe/#/search" target="_blank" rel="noopener">🔗 Portal oficial del MTC (licencias.mtc.gob.pe)</a>
+    </div>
+  </div>
+
+  <p class="aviso">Esta página muestra únicamente el avance del trámite que gestionamos para ti. Para el registro legal y oficial de tu licencia, usa siempre el portal del Estado Peruano enlazado arriba.</p>
+</div>
+
+<script>
+const TIPOS = {
+  nueva:            "Nueva licencia",
+  revalidacion:     "Revalidación",
+  recategorizacion: "Recategorización",
+  retenciones:      "Retenciones"
+};
+const ESTADOS = {
+  tramite:    { txt:"Trámite en proceso", clase:"e-tramite" },
+  aprobado:   { txt:"Trámite aprobado",   clase:"e-aprobado" },
+  observado:  { txt:"Trámite observado",  clase:"e-observado" },
+  finalizado: { txt:"Trámite finalizado", clase:"e-finalizado" }
+};
+const $ = id => document.getElementById(id);
+const escapa = t => String(t ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// El logo se sube desde el sistema interno (Administrador de plantillas / barra superior) y,
+// como este portal se hospeda en el mismo dominio, comparte el mismo localStorage: si ya lo
+// subieron ahí, se usa aquí también. Si todavía no hay logo, se deja el texto de respaldo.
+(() => {
+  try{
+    const logo = localStorage.getItem("mtc_logo");
+    if (logo){
+      const val = JSON.parse(logo);
+      if (val) $("marcaHeader").innerHTML = `<img src="${val}" style="height:34px;width:auto;object-fit:contain;background:#fff;border-radius:6px;padding:3px">`;
+    }
+  }catch(_e){ /* se deja el texto de respaldo */ }
+})();
+
+let datos = null;
+async function cargarDatos(){
+  try{
+    const r = await fetch("datos-publicos.json", { cache:"no-store" });
+    if (!r.ok) throw new Error("no-ok");
+    datos = await r.json();
+  }catch(e){
+    datos = null;
+  }
+}
+cargarDatos();
+
+async function buscar(){
+  const dni = $("dni").value.trim();
+  const msg = $("msg");
+  const res = $("resultados");
+  res.innerHTML = "";
+  if (!/^\d{8}$/.test(dni)){ msg.textContent = "Ingresa un DNI válido de 8 dígitos."; return; }
+  if (datos === null) await cargarDatos();
+  if (datos === null){
+    msg.textContent = "No se pudo cargar la información. Intenta más tarde o contáctanos.";
+    return;
+  }
+  const coincidencias = datos.filter(x => x.dni === dni);
+  if (!coincidencias.length){
+    msg.textContent = "No encontramos trámites registrados con ese DNI.";
+    return;
+  }
+  msg.textContent = "";
+
+  const conductor = coincidencias[0];
+  const panelConductor = `<div class="panel-mtc">
+    <h2>Datos del conductor</h2>
+    <div class="grid">
+      <div class="campo-mtc"><div class="et">Apellidos</div><div class="val">${escapa(conductor.apellidos) || "—"}</div></div>
+      <div class="campo-mtc"><div class="et">Nombres</div><div class="val">${escapa(conductor.nombres) || "—"}</div></div>
+      <div class="campo-mtc"><div class="et">Tipo de documento</div><div class="val">DNI</div></div>
+      <div class="campo-mtc"><div class="et">Número de documento</div><div class="val">${escapa(dni)}</div></div>
+    </div>
+  </div>`;
+
+  const iconoDoc = nombre => /\.pdf$/i.test(nombre) ? "📄" : "🖼️";
+  const tarjetas = coincidencias.map(t => {
+    const e = ESTADOS[t.estado] || { txt:t.estado, clase:"e-tramite" };
+    const docsHtml = (t.docs && t.docs.length)
+      ? `<div class="docs-box"><span class="et">Documentos de tu trámite</span>${t.docs.map(d => `
+          <a class="doc-link" href="${d.data}" download="${escapa(d.nombre)}" target="_blank" rel="noopener">
+            <span class="ic">${iconoDoc(d.nombre)}</span>
+            <span class="nom">${escapa(d.nombre)}</span>
+            <span class="accion">Ver / Descargar ⬇</span>
+          </a>`).join("")}</div>`
+      : "";
+    const cargaHtml = t.estado === "tramite"
+      ? `<div class="carga-box">
+          <div class="txt">⏳ Procesando tu trámite…</div>
+          <div class="carga-barra"><div class="relleno"></div></div>
+        </div>`
+      : "";
+    const tramiteCard = `<div class="tramite-card">
+      <div class="top">
+        <div>
+          <div class="tipo">${escapa(TIPOS[t.tipo] || t.tipo)}</div>
+          <div class="meta">Código ${escapa(t.codigo)} · Registrado el ${escapa(t.fechaRegistro)}</div>
+          <div class="meta">Última actualización: ${escapa(t.actualizado)}</div>
+        </div>
+        <span class="estado ${e.clase}">${escapa(e.txt)}</span>
+      </div>
+      ${cargaHtml}
+      ${docsHtml}
+    </div>`;
+
+    if (!t.numeroLicencia) return tramiteCard;
+
+    const panelLicencia = `<div class="panel-mtc">
+      <h2>Licencia · ${escapa(TIPOS[t.tipo] || t.tipo)}</h2>
+      <div class="grid">
+        <div class="campo-mtc"><div class="et">Clase y categoría</div><div class="val">${escapa(t.categoria) || "—"}</div></div>
+        <div class="campo-mtc"><div class="et">Tipo de licencia</div><div class="val">${escapa(t.tipoLicencia) || "—"}</div></div>
+        <div class="campo-mtc"><div class="et">Restricciones</div><div class="val">${escapa(t.restricciones) || "Sin restricciones"}</div></div>
+        <div class="campo-mtc"><div class="et">Centro de emisión</div><div class="val">${escapa(t.centroEmision) || "—"}</div></div>
+        <div class="campo-mtc"><div class="et">Número de licencia</div><div class="val">${escapa(t.numeroLicencia)}</div></div>
+        <div class="campo-mtc"><div class="et">Fecha de expedición</div><div class="val">${escapa(t.fechaExpedicion) || "—"}</div></div>
+        <div class="campo-mtc"><div class="et">Vigente hasta</div><div class="val">${escapa(t.vigenteHasta) || "—"}</div></div>
+      </div>
+    </div>`;
+    return tramiteCard + panelLicencia;
+  }).join("");
+
+  res.innerHTML = panelConductor + tarjetas;
+}
+</script>
+</body>
+</html>
