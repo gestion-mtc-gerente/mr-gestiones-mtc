@@ -837,6 +837,164 @@ async function escanearDocumento(inputEl, targets, msgId){
   }
 }
 
+// ---------- Lector de la consulta oficial de papeletas (scppp.mtc.gob.pe) ----------
+// El cliente/gestor hace la consulta él mismo en el portal oficial (con su captcha) y sube
+// una foto o captura de esa pantalla de resultados; el lector extrae los datos y arma una
+// tabla igual a la del portal oficial, para que la información que se le muestra al cliente
+// sea exacta. Como es una tabla (no una ficha de etiqueta:valor), el resultado es un cálculo
+// aproximado — siempre se muestra editable para revisar antes de guardar.
+let filasOficialesEscaneadas = [];
+let infoOficialEscaneada = null;
+function parsearConsultaPapeletas(texto){
+  const lineas = String(texto || "").split("\n").map(l => l.trim()).filter(Boolean);
+  const idx = re => lineas.findIndex(l => re.test(l));
+  function valorTrasEtiqueta(i, re){
+    if (i < 0) return "";
+    const linea = lineas[i];
+    const m = linea.match(re);
+    if (m){
+      const despues = linea.slice(m.index + m[0].length).replace(/^[:\-\s]+/, "").trim();
+      if (despues && despues !== "-") return despues;
+      if (despues === "-") return "";
+    }
+    const sig = lineas[i + 1];
+    if (sig && !/^[A-ZÑÁÉÍÓÚ ]+:/.test(sig)) return sig === "-" ? "" : sig;
+    return "";
+  }
+  const administrado = valorTrasEtiqueta(idx(/CONSULTA\s*DEL\s*ADMINISTRADO/i), /CONSULTA\s*DEL\s*ADMINISTRADO/i);
+  const dni = valorTrasEtiqueta(idx(/NRO\.?\s*DE\s*DOCUMENTO/i), /NRO\.?\s*DE\s*DOCUMENTO[^:]*/i);
+  const numeroLicencia = valorTrasEtiqueta(idx(/NRO\.?\s*DE\s*LICENCIA/i), /NRO\.?\s*DE\s*LICENCIA/i);
+  const claseCategoria = valorTrasEtiqueta(idx(/CLASE\s*Y\s*CATEGORIA/i), /CLASE\s*Y\s*CATEGORIA/i);
+  const vigenteHasta = valorTrasEtiqueta(idx(/VIGENTE\s*HASTA/i), /VIGENTE\s*HASTA/i);
+  const estadoLicencia = valorTrasEtiqueta(idx(/ESTADO\s*DE\s*LA\s*LICENCIA/i), /ESTADO\s*DE\s*LA\s*LICENCIA/i);
+
+  // Tabla: busca la línea de cabecera ("ENTIDAD ... PAPELETA ... FECHA ...") y a partir de ahí
+  // intenta leer cada fila. El formato real: N° ENTIDAD PAPELETA FECHA [FECHA FIRME] FALTA
+  // ESTADO DEUDA [RESOLUCION] RETENCION(SI/NO).
+  const iCab = idx(/ENTIDAD/i);
+  const filas = [];
+  const RE_FILA = /^(\d+)\s+(.+?)\s+(\d{3,7})\s+(\d{2}\/\d{2}\/\d{4})\s*(\d{2}\/\d{2}\/\d{4})?\s*([A-Z]{1,2}\d{1,3}[A-Z]?)\s+(.+?)\s*(SI|NO)?$/i;
+  if (iCab >= 0){
+    for (let j = iCab + 1; j < lineas.length; j++){
+      const l = lineas[j];
+      if (/Desarrollado\s*por/i.test(l)) break;
+      const m = l.match(RE_FILA);
+      if (!m) continue;
+      filas.push({
+        entidad: m[2].trim(),
+        papeleta: m[3].trim(),
+        fecha: m[4] || "",
+        fechaFirme: m[5] || "",
+        falta: (m[6] || "").toUpperCase(),
+        estadoDeuda: (m[7] || "").trim(),
+        resolucion: "",
+        retencion: (m[8] || "").toUpperCase() || "NO"
+      });
+    }
+  }
+  return { administrado, dni, numeroLicencia, claseCategoria, vigenteHasta, estadoLicencia, filas };
+}
+function filaOficialHtml(f, i){
+  const campo = (k, v, ancho) => `<input data-campo="${k}" data-fila="${i}" value="${escapa(v||"")}" style="width:${ancho}px;padding:5px 6px;font-size:11px;margin:0">`;
+  return `<tr>
+    <td>${campo("entidad", f.entidad, 130)}</td>
+    <td>${campo("papeleta", f.papeleta, 70)}</td>
+    <td>${campo("fecha", f.fecha, 80)}</td>
+    <td>${campo("fechaFirme", f.fechaFirme, 80)}</td>
+    <td>${campo("falta", f.falta, 55)}</td>
+    <td>${campo("estadoDeuda", f.estadoDeuda, 110)}</td>
+    <td>${campo("resolucion", f.resolucion, 80)}</td>
+    <td>${campo("retencion", f.retencion, 45)}</td>
+    <td><button type="button" class="btn-sec" style="padding:4px 8px;font-size:11px" onclick="quitarFilaOficial(${i})">✕</button></td>
+  </tr>`;
+}
+function renderTablaOficialEditable(){
+  const cont = $("pTablaOficial");
+  if (!cont) return;
+  if (!filasOficialesEscaneadas.length){ cont.innerHTML = ""; return; }
+  cont.innerHTML = `<div style="overflow-x:auto;margin-top:8px">
+    <table style="font-size:11px;border-collapse:collapse;width:100%">
+      <thead><tr style="text-align:left;color:var(--gris)"><th>Entidad</th><th>Papeleta</th><th>Fecha</th><th>Fecha firme</th><th>Falta</th><th>Estado deuda</th><th>Resolución</th><th>Retención</th><th></th></tr></thead>
+      <tbody>${filasOficialesEscaneadas.map(filaOficialHtml).join("")}</tbody>
+    </table>
+  </div>
+  <button type="button" class="btn-sec" style="margin-top:8px;font-size:11px" onclick="agregarFilaOficial()">+ Agregar fila</button>`;
+}
+function agregarFilaOficial(){
+  filasOficialesEscaneadas.push({ entidad:"", papeleta:"", fecha:"", fechaFirme:"", falta:"", estadoDeuda:"", resolucion:"", retencion:"NO" });
+  renderTablaOficialEditable();
+}
+function quitarFilaOficial(i){
+  filasOficialesEscaneadas.splice(i, 1);
+  renderTablaOficialEditable();
+}
+function leerFilasOficialesDesdeDOM(){
+  const cont = $("pTablaOficial");
+  if (!cont) return [];
+  const filas = {};
+  cont.querySelectorAll("input[data-fila]").forEach(inp => {
+    const i = inp.dataset.fila;
+    filas[i] = filas[i] || {};
+    filas[i][inp.dataset.campo] = inp.value.trim();
+  });
+  return Object.values(filas);
+}
+async function escanearConsultaOficial(inputEl){
+  const f = inputEl.files[0];
+  if (!f) return;
+  const msg = $("pScanOficialMsg");
+  if (typeof Tesseract === "undefined"){
+    msg.style.color = "var(--rojo)";
+    msg.textContent = "No se pudo cargar el lector de documentos. Verifica tu conexión a internet.";
+    return;
+  }
+  mostrarCargando("Leyendo consulta de papeletas…", f);
+  msg.style.color = "var(--gris)";
+  msg.textContent = "Leyendo documento… 0%";
+  try{
+    const archivo = await preprocesarImagen(f);
+    let anchoImagen = 0;
+    try{
+      const bmp = await createImageBitmap(archivo);
+      anchoImagen = bmp.width;
+      if (bmp.close) bmp.close();
+    }catch(_e){ /* sigue sin esto */ }
+    const { data } = await Tesseract.recognize(archivo, "spa", {
+      logger: m => { if (m.status === "recognizing text") msg.textContent = "Leyendo documento… " + Math.round(m.progress * 100) + "%"; }
+    });
+    const textoPosicion = reconstruirPorPosicion(data, anchoImagen);
+    const info = parsearConsultaPapeletas(textoPosicion || data.text);
+    let encontrado = false;
+    if (info.dni && $("pDni") && !$("pDni").value.trim()){ $("pDni").value = info.dni; encontrado = true; }
+    if (info.administrado){
+      const partes = info.administrado.split(/\s+/);
+      if (partes.length >= 2 && $("pNom") && !$("pNom").value.trim() && $("pApe") && !$("pApe").value.trim()){
+        // El portal oficial junta todo el nombre; se deja completo en Nombres para no adivinar
+        // mal dónde empiezan los apellidos, y se puede repartir a mano si hace falta.
+        $("pNom").value = info.administrado;
+        encontrado = true;
+      }
+    }
+    filasOficialesEscaneadas = info.filas;
+    infoOficialEscaneada = { numeroLicencia: info.numeroLicencia, claseCategoria: info.claseCategoria, vigenteHasta: info.vigenteHasta, estadoLicencia: info.estadoLicencia };
+    if (filasOficialesEscaneadas.length) encontrado = true;
+    renderTablaOficialEditable();
+    if (encontrado){
+      msg.style.color = "var(--verde)";
+      msg.innerHTML = `✓ Datos detectados (${filasOficialesEscaneadas.length} papeleta${filasOficialesEscaneadas.length===1?"":"s"} en la tabla). Revisa y corrige cualquier dato antes de registrar — el lector puede equivocarse, sobre todo en la tabla.`;
+    } else {
+      msg.style.color = "var(--rojo)";
+      msg.textContent = "No se pudo leer la tabla automáticamente. Agrega las filas manualmente con el botón de abajo.";
+      renderTablaOficialEditable();
+    }
+  }catch(e){
+    msg.style.color = "var(--rojo)";
+    msg.textContent = "Error al leer el documento. Inténtalo de nuevo o completa manualmente.";
+  }finally{
+    await ocultarCargando();
+  }
+}
+
 // ---------- Expediente (crear / editar) ----------
 function abrirExpediente(id, tipoDefecto){
   if (!id) fotoEscaneada = null;
@@ -1737,6 +1895,7 @@ function renderPapeletasConsulta(dni){
         ${s.papeletas.map(p => `<span style="display:inline-block;background:${NIVEL_COLOR[(catalogo[p.codigo]||{}).n]||"#8B7F7F"};color:#fff;border-radius:12px;padding:3px 10px;margin:2px;font-weight:700;font-size:11px">${escapa(p.codigo)}</span>`).join("")}
         <div style="margin-top:8px;font-size:12px;color:var(--gris)">Total: <b>${totalPuntos} puntos</b> · ${soles(totalMulta)} en multas</div>
       </div>
+      ${tablaConsultaOficialHtml(s.consultaOficial)}
     </div>`;
   }).join("");
 }
@@ -1894,6 +2053,13 @@ function panelRegistrar(){
         </div>
         <div class="msg-scan" id="pScanMsg"></div>
       </div>
+      <div class="caja-scan">
+        <label>📷 ESCANEAR CONSULTA OFICIAL DE PAPELETAS (opcional)</label>
+        <p>Si ya hiciste la consulta en <b>scppp.mtc.gob.pe</b> (resolviendo el captcha ahí), sube una foto o captura de esa pantalla de resultados. El lector arma la tabla igual que en el portal oficial, para que la información sea exacta.</p>
+        <input type="file" accept="image/*" id="pScanOficial" onchange="escanearConsultaOficial(this)">
+        <div class="msg-scan" id="pScanOficialMsg"></div>
+        <div id="pTablaOficial"></div>
+      </div>
       <div class="form-grid">
         <div><label>DNI *</label><input id="pDni" maxlength="8" inputmode="numeric"></div>
         <div><label>Teléfono</label><input id="pTel" inputmode="tel"></div>
@@ -1944,11 +2110,13 @@ function registrarSolicitud(){
     msg.style.color="var(--rojo)"; msg.textContent="Ya existe una solicitud idéntica para este cliente."; return;
   }
   const est = $("pEstado").value;
+  const filasOficiales = leerFilasOficialesDesdeDOM().filter(f => f.entidad || f.papeleta || f.falta);
   const s = {
     id: "S" + Date.now(), firma, dni, nombres:nom, apellidos:ape,
     telefono:$("pTel").value.trim(), correo:$("pCor").value.trim(), direccion:$("pDir").value.trim(),
     observaciones:$("pObs").value.trim(), estado:est,
     papeletas: sel.map(c => ({ codigo:c, fecha, estado:"Pendiente" })),
+    consultaOficial: filasOficiales.length ? { ...infoOficialEscaneada, filas: filasOficiales } : null,
     creadoMs: Date.now(), fechaRegistro: ahora(), actualizado: ahora(),
     historial:[{ fecha: ahora(), usuario: sesion.nombre, accion:"Registró la solicitud con " + sel.length + " papeleta(s)" }]
   };
@@ -1959,6 +2127,10 @@ function registrarSolicitud(){
   msg.style.color="var(--verde)"; msg.textContent="Solicitud registrada ✓";
   ["pDni","pNom","pApe","pTel","pCor","pDir","pObs"].forEach(i => $(i).value = "");
   document.querySelectorAll(".chkPap:checked").forEach(c => c.checked = false);
+  filasOficialesEscaneadas = [];
+  infoOficialEscaneada = null;
+  renderTablaOficialEditable();
+  $("pScanOficialMsg").innerHTML = "";
 }
 
 // --- Estado de solicitudes ---
@@ -1972,6 +2144,37 @@ function panelEstados(){
         <div class="num">${solicitudes.filter(s => s.estado === k).length}</div>
         <div class="lbl">${v.etq}</div></div>`).join("")}
     </div>` + solicitudes.map(s => tarjetaSolicitud(s)).join("");
+}
+// Tabla de la consulta oficial escaneada, con las mismas columnas que scppp.mtc.gob.pe.
+// Se usa tanto en la tarjeta interna del gestor como en las consultas que ve el cliente.
+function tablaConsultaOficialHtml(co){
+  if (!co || !co.filas || !co.filas.length) return "";
+  const filas = co.filas.map(f => `<tr>
+    <td>${escapa(f.entidad) || "—"}</td>
+    <td>${escapa(f.papeleta) || "—"}</td>
+    <td>${escapa(f.fecha) || "—"}</td>
+    <td>${escapa(f.fechaFirme) || "—"}</td>
+    <td>${escapa(f.falta) || "—"}</td>
+    <td>${escapa(f.estadoDeuda) || "—"}</td>
+    <td>${escapa(f.resolucion) || "—"}</td>
+    <td>${escapa(f.retencion) || "—"}</td>
+  </tr>`).join("");
+  const cabecera = (co.numeroLicencia || co.claseCategoria || co.vigenteHasta || co.estadoLicencia)
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px 14px;margin-bottom:8px;font-size:11px">
+        <div><span style="color:var(--gris)">N° Licencia: </span><b>${escapa(co.numeroLicencia) || "—"}</b></div>
+        <div><span style="color:var(--gris)">Clase y categoría: </span><b>${escapa(co.claseCategoria) || "—"}</b></div>
+        <div><span style="color:var(--gris)">Vigente hasta: </span><b>${escapa(co.vigenteHasta) || "—"}</b></div>
+        <div><span style="color:var(--gris)">Estado licencia: </span><b>${escapa(co.estadoLicencia) || "—"}</b></div>
+      </div>`
+    : "";
+  return `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--borde)">
+    <span style="font-size:10.5px;color:var(--gris);text-transform:uppercase;letter-spacing:.5px;font-weight:700;display:block;margin-bottom:8px">Consulta oficial MTC (scppp.mtc.gob.pe)</span>
+    ${cabecera}
+    <div style="overflow-x:auto"><table style="font-size:11px;border-collapse:collapse;width:100%">
+      <thead><tr style="text-align:left;color:var(--gris)"><th>Entidad</th><th>Papeleta</th><th>Fecha</th><th>F. Firme</th><th>Falta</th><th>Estado deuda</th><th>Resolución</th><th>Retención</th></tr></thead>
+      <tbody>${filas}</tbody>
+    </table></div>
+  </div>`;
 }
 function tarjetaSolicitud(s){
   const e = EST_PAP[s.estado];
@@ -1996,6 +2199,7 @@ function tarjetaSolicitud(s){
         return `<span title="${escapa(x.d||"")}" style="display:inline-block;background:${NIVEL_COLOR[x.n]||"#8B7F7F"};color:#fff;border-radius:12px;padding:3px 10px;margin:2px;font-weight:700">${p.codigo} · ${x.p ?? 0} pts</span>`;}).join("")}
       <span style="display:block;margin-top:6px">Total: <b>${s.papeletas.reduce((a,p)=>a+((catalogo[p.codigo]||{}).p||0),0)} puntos</b> · ${soles(s.papeletas.reduce((a,p)=>a+((catalogo[p.codigo]||{}).m||0),0))} en multas</span>
     </div>
+    ${tablaConsultaOficialHtml(s.consultaOficial)}
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
       <select onchange="cambiarEstadoSol('${s.id}', this.value)" style="max-width:190px;font-size:13px">
         ${Object.entries(EST_PAP).map(([k,v]) => `<option value="${k}" ${s.estado===k?"selected":""}>${v.etq}</option>`).join("")}
@@ -2444,7 +2648,8 @@ function publicarPortal(){
     papeletas: (s.papeletas || []).map(p => {
       const c = catalogo[p.codigo] || {};
       return { codigo: p.codigo, nivel: c.n || "", puntos: c.p || 0, multa: c.m || 0 };
-    })
+    }),
+    consultaOficial: s.consultaOficial || null
   }));
   const publico = { tramites, papeletas: papeletasPub };
   const pesoMB = (JSON.stringify(publico).length / (1024*1024)).toFixed(1);

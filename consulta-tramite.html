@@ -178,6 +178,35 @@ function cambiarTab(tab){
   $("resultadosPapeletas").classList.toggle("oculto", tab !== "papeletas");
 }
 
+function tablaConsultaOficialHtml(co){
+  if (!co || !co.filas || !co.filas.length) return "";
+  const filas = co.filas.map(f => `<tr>
+    <td>${escapa(f.entidad) || "—"}</td>
+    <td>${escapa(f.papeleta) || "—"}</td>
+    <td>${escapa(f.fecha) || "—"}</td>
+    <td>${escapa(f.fechaFirme) || "—"}</td>
+    <td>${escapa(f.falta) || "—"}</td>
+    <td>${escapa(f.estadoDeuda) || "—"}</td>
+    <td>${escapa(f.resolucion) || "—"}</td>
+    <td>${escapa(f.retencion) || "—"}</td>
+  </tr>`).join("");
+  const cabecera = (co.numeroLicencia || co.claseCategoria || co.vigenteHasta || co.estadoLicencia)
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px 14px;margin-bottom:8px;font-size:11px">
+        <div><span style="color:var(--gris)">N° Licencia: </span><b>${escapa(co.numeroLicencia) || "—"}</b></div>
+        <div><span style="color:var(--gris)">Clase y categoría: </span><b>${escapa(co.claseCategoria) || "—"}</b></div>
+        <div><span style="color:var(--gris)">Vigente hasta: </span><b>${escapa(co.vigenteHasta) || "—"}</b></div>
+        <div><span style="color:var(--gris)">Estado licencia: </span><b>${escapa(co.estadoLicencia) || "—"}</b></div>
+      </div>`
+    : "";
+  return `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--borde)">
+    <span style="font-size:10.5px;color:var(--gris);text-transform:uppercase;letter-spacing:.5px;font-weight:700;display:block;margin-bottom:8px">Consulta oficial MTC (scppp.mtc.gob.pe)</span>
+    ${cabecera}
+    <div style="overflow-x:auto"><table style="font-size:11px;border-collapse:collapse;width:100%">
+      <thead><tr style="text-align:left;color:var(--gris)"><th>Entidad</th><th>Papeleta</th><th>Fecha</th><th>F. Firme</th><th>Falta</th><th>Estado deuda</th><th>Resolución</th><th>Retención</th></tr></thead>
+      <tbody>${filas}</tbody>
+    </table></div>
+  </div>`;
+}
 function renderPapeletas(dni){
   const propias = (datos.papeletas || []).filter(s => s.dni === dni);
   if (!propias.length) return `<div class="card"><p style="color:var(--gris);font-size:13px">No encontramos solicitudes de eliminación de papeletas registradas con ese DNI.</p></div>`;
@@ -206,6 +235,7 @@ function renderPapeletas(dni){
         ${s.papeletas.map(p => `<span style="display:inline-block;background:${NIVEL_COLOR[p.nivel]||"#8B7F7F"};color:#fff;border-radius:12px;padding:3px 10px;margin:2px;font-weight:700;font-size:11px">${escapa(p.codigo)}</span>`).join("")}
         <div style="margin-top:8px;font-size:12px;color:var(--gris)">Total: <b>${totalPuntos} puntos</b> · ${soles(totalMulta)} en multas</div>
       </div>
+      ${tablaConsultaOficialHtml(s.consultaOficial)}
     </div>`;
   }).join("");
 }
