@@ -957,6 +957,19 @@ function renderTablaOficialEditable(){
   </div>
   <button type="button" class="btn-sec" style="margin-top:8px;font-size:11px" onclick="agregarFilaOficial()">+ Agregar fila</button>`;
 }
+// Marca en la lista de "Papeletas del cliente" (más abajo en el formulario) la casilla de
+// cada código de falta que el lector detectó en la tabla de la consulta oficial, comparando
+// sin distinguir mayúsculas/minúsculas (el catálogo puede tener códigos como "M20a").
+function marcarPapeletasDetectadas(filas){
+  const marcados = [];
+  (filas || []).forEach(f => {
+    const codigo = (f.falta || "").trim();
+    if (!codigo) return;
+    const chk = [...document.querySelectorAll(".chkPap")].find(c => c.value.toUpperCase() === codigo.toUpperCase());
+    if (chk && !chk.checked){ chk.checked = true; marcados.push(chk.value); }
+  });
+  return marcados;
+}
 function agregarFilaOficial(){
   filasOficialesEscaneadas.push({ entidad:"", papeleta:"", fecha:"", fechaFirme:"", falta:"", estadoDeuda:"", resolucion:"", retencion:"NO" });
   renderTablaOficialEditable();
@@ -1037,12 +1050,18 @@ async function escanearConsultaOficial(inputEl){
     infoOficialEscaneada = { numeroLicencia: info.numeroLicencia, claseCategoria: info.claseCategoria, vigenteHasta: info.vigenteHasta, estadoLicencia: info.estadoLicencia };
     if (filasOficialesEscaneadas.length) encontrado = true;
     renderTablaOficialEditable();
+    // Marca sola la casilla de "Papeletas del cliente" cuyo código coincide con lo detectado
+    // en la tabla de la consulta oficial, para no tener que buscarla y marcarla a mano.
+    const codigosMarcados = marcarPapeletasDetectadas(filasOficialesEscaneadas);
     const textoEscapado1 = escapa((data.text||"").trim()).replace(/\n/g, "<br>");
     const textoEscapado2 = escapa((textoPosicion||"").trim()).replace(/\n/g, "<br>");
     const bloqueTexto = `<div style="margin-top:6px"><button type="button" class="link" style="font-size:11px" onclick="const d=document.getElementById('pScanOficialRaw'); d.classList.toggle('oculto')">👁️ Ver texto que detectó el lector</button><div id="pScanOficialRaw" class="oculto" style="background:#fff;border:1px solid var(--borde);border-radius:8px;padding:8px 10px;margin-top:6px;font-size:11px;color:var(--texto);max-height:180px;overflow-y:auto"><b>Texto (OCR):</b><br>${textoEscapado1 || "(vacío)"}<hr style="margin:8px 0;border:none;border-top:1px solid var(--borde)"><b>Texto (por posición):</b><br>${textoEscapado2 || "(vacío)"}</div></div>`;
     if (encontrado){
+      const avisoMarcadas = codigosMarcados.length
+        ? ` Se marcó sola${codigosMarcados.length===1?"":"n"} en la lista de abajo: ${codigosMarcados.join(", ")}.`
+        : (filasOficialesEscaneadas.length ? " No encontré en el catálogo el código exacto de la tabla — márcala tú mismo abajo, o corrige el código \"Falta\" en la tabla si el lector lo leyó mal." : "");
       msg.style.color = "var(--verde)";
-      msg.innerHTML = `✓ Datos detectados (${filasOficialesEscaneadas.length} papeleta${filasOficialesEscaneadas.length===1?"":"s"} en la tabla). Revisa y corrige cualquier dato antes de registrar — el lector puede equivocarse, sobre todo en la tabla.` + bloqueTexto;
+      msg.innerHTML = `✓ Datos detectados (${filasOficialesEscaneadas.length} papeleta${filasOficialesEscaneadas.length===1?"":"s"} en la tabla). Revisa y corrige cualquier dato antes de registrar — el lector puede equivocarse, sobre todo en la tabla.${avisoMarcadas}` + bloqueTexto;
     } else {
       msg.style.color = "var(--rojo)";
       msg.innerHTML = "No se pudo leer la tabla automáticamente. Agrega las filas manualmente con el botón de abajo, o revisa lo que alcanzó a leer el lector." + bloqueTexto;
