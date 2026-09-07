@@ -57,6 +57,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--rojo)}
   animation:cargaAvance 7s ease-in-out infinite, cargaBrillo 1.6s linear infinite}
 @keyframes cargaAvance{0%{width:3%} 75%{width:90%} 100%{width:3%}}
 @keyframes cargaBrillo{0%{background-position:0% 0} 100%{background-position:200% 0}}
+.tabs-consulta{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.tab-consulta{background:#fff;color:var(--texto);border:1px solid var(--borde);border-radius:10px;padding:10px 16px;font-weight:700;font-size:13px}
+.tab-consulta.activo{background:var(--rojo);color:#fff;border-color:var(--rojo)}
 
 /* ===== LOGIN ===== */
 #pantallaLogin{min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;
@@ -1691,19 +1694,74 @@ function vistaConsulta(){
       </div>
       <p class="msg" id="cpMsg" style="font-size:13px;font-weight:700;margin-top:10px"></p>
     </div>
-    <div id="cpResultados"></div>`;
+    <div class="tabs-consulta oculto" id="cpTabs">
+      <button class="tab-consulta activo" data-tab="tramite" onclick="cambiarTabConsulta('tramite')">🪪 Trámite de licencia</button>
+      <button class="tab-consulta" data-tab="papeletas" onclick="cambiarTabConsulta('papeletas')">🚦 Papeletas</button>
+    </div>
+    <div id="cpPanelTramite"></div>
+    <div id="cpPanelPapeletas" class="oculto"></div>`;
+}
+function cambiarTabConsulta(tab){
+  document.querySelectorAll("#cpTabs .tab-consulta").forEach(b => b.classList.toggle("activo", b.dataset.tab === tab));
+  $("cpPanelTramite").classList.toggle("oculto", tab !== "tramite");
+  $("cpPanelPapeletas").classList.toggle("oculto", tab !== "papeletas");
 }
 const iconoDocConsulta = nombre => /\.pdf$/i.test(nombre) ? "📄" : "🖼️";
+// Papeletas: usa las solicitudes que la propia gestoría ya está tramitando (no el portal
+// oficial del MTC, que pide captcha y no se puede consultar automáticamente desde aquí).
+function renderPapeletasConsulta(dni){
+  const propias = solicitudes.filter(s => s.dni === dni);
+  if (!propias.length) return `<div class="card"><p style="color:var(--gris)">No se encontraron solicitudes de eliminación de papeletas registradas con ese DNI.</p></div>`;
+  return propias.map(s => {
+    const e = EST_PAP[s.estado];
+    const totalPuntos = s.papeletas.reduce((a,p) => a + ((catalogo[p.codigo]||{}).p || 0), 0);
+    const totalMulta = s.papeletas.reduce((a,p) => a + ((catalogo[p.codigo]||{}).m || 0), 0);
+    const barraHtml = s.estado !== "finalizada"
+      ? `<div style="background:var(--fondo);border-radius:8px;height:10px;overflow:hidden;margin:10px 0">
+          <div style="height:100%;width:${e.barra}%;background:${e.color};border-radius:8px;transition:width .6s"></div>
+        </div>`
+      : "";
+    return `<div class="tramite-card">
+      <div class="top">
+        <div>
+          <div class="tipo">Solicitud de eliminación de papeletas</div>
+          <div class="meta">${s.papeletas.length} papeleta(s) · Registrado el ${escapa(s.fechaRegistro)}</div>
+          <div class="meta">Última actualización: ${escapa(s.actualizado)}</div>
+        </div>
+        <span class="estado-pill" style="background:${e.color}">${escapa(e.etq)}</span>
+      </div>
+      <p style="font-size:13px;margin-top:8px">${escapa(e.txt)}</p>
+      ${barraHtml}
+      <div class="docs-box">
+        <span class="et">Papeletas incluidas</span>
+        ${s.papeletas.map(p => `<span style="display:inline-block;background:${NIVEL_COLOR[(catalogo[p.codigo]||{}).n]||"#8B7F7F"};color:#fff;border-radius:12px;padding:3px 10px;margin:2px;font-weight:700;font-size:11px">${escapa(p.codigo)}</span>`).join("")}
+        <div style="margin-top:8px;font-size:12px;color:var(--gris)">Total: <b>${totalPuntos} puntos</b> · ${soles(totalMulta)} en multas</div>
+      </div>
+    </div>`;
+  }).join("");
+}
 function buscarConsultaInterna(){
   const dni = ($("cpDni").value || "").trim();
   const msg = $("cpMsg");
-  const res = $("cpResultados");
-  res.innerHTML = "";
+  const panelTramite = $("cpPanelTramite");
+  const panelPapeletas = $("cpPanelPapeletas");
+  const tabs = $("cpTabs");
+  panelTramite.innerHTML = "";
+  panelPapeletas.innerHTML = "";
+  tabs.classList.add("oculto");
   msg.style.color = "var(--rojo)";
   if (!/^\d{8}$/.test(dni)){ msg.textContent = "Ingresa un DNI válido de 8 dígitos."; return; }
   const coincidencias = expedientes.filter(x => x.dni === dni);
-  if (!coincidencias.length){ msg.textContent = "No se encontró ningún trámite registrado con ese DNI."; return; }
+  const solicitudesPropias = solicitudes.filter(x => x.dni === dni);
+  if (!coincidencias.length && !solicitudesPropias.length){ msg.textContent = "No se encontró ningún trámite ni solicitud registrado con ese DNI."; return; }
   msg.textContent = "";
+  tabs.classList.remove("oculto");
+  cambiarTabConsulta(coincidencias.length ? "tramite" : "papeletas");
+  panelPapeletas.innerHTML = renderPapeletasConsulta(dni);
+  if (!coincidencias.length){
+    panelTramite.innerHTML = `<div class="card"><p style="color:var(--gris)">Este DNI no tiene trámites de licencia registrados.</p></div>`;
+    return;
+  }
 
   const c0 = coincidencias[0];
   const panelConductor = `<div class="panel-mtc">
@@ -1766,7 +1824,7 @@ function buscarConsultaInterna(){
     return tramiteCard + panelLicencia;
   }).join("");
 
-  res.innerHTML = panelConductor + tarjetas;
+  panelTramite.innerHTML = panelConductor + tarjetas;
 }
 
 // --- Vista principal del módulo ---
@@ -2365,8 +2423,8 @@ function vistaBackup(){
     </div>`;
 }
 function publicarPortal(){
-  if (!expedientes.length) return alert("No hay trámites registrados todavía.");
-  const publico = expedientes.map(e => ({
+  if (!expedientes.length && !solicitudes.length) return alert("No hay trámites ni solicitudes registradas todavía.");
+  const tramites = expedientes.map(e => ({
     dni: e.dni, nombres: e.nombres, apellidos: e.apellidos,
     tipo: e.tipo, estado: e.estado,
     fechaRegistro: e.fechaRegistro,
@@ -2378,6 +2436,17 @@ function publicarPortal(){
     vigenteHasta: e.vigenteHasta || "",
     docs: (e.docs || []).map(d => ({ nombre: d.nombre, data: d.data }))
   }));
+  // Las papeletas se exportan con los datos del catálogo ya resueltos (puntos, multa, nivel)
+  // porque el portal público no tiene acceso al catálogo completo, solo a este archivo.
+  const papeletasPub = solicitudes.map(s => ({
+    dni: s.dni, estado: s.estado,
+    fechaRegistro: s.fechaRegistro, actualizado: s.actualizado,
+    papeletas: (s.papeletas || []).map(p => {
+      const c = catalogo[p.codigo] || {};
+      return { codigo: p.codigo, nivel: c.n || "", puntos: c.p || 0, multa: c.m || 0 };
+    })
+  }));
+  const publico = { tramites, papeletas: papeletasPub };
   const pesoMB = (JSON.stringify(publico).length / (1024*1024)).toFixed(1);
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([JSON.stringify(publico)], {type:"application/json"}));

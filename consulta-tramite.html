@@ -78,6 +78,11 @@ header .sub{font-size:12px; opacity:.85; margin-top:4px}
 .doc-link .ic{font-size:20px}
 .doc-link .nom{font-size:13px; font-weight:700; word-break:break-all}
 .doc-link .accion{margin-left:auto; font-size:11px; font-weight:800; color:var(--rojo-osc); white-space:nowrap}
+
+/* ===== PESTAÑAS DE CONSULTA (trámite / papeletas) ===== */
+.tabs-consulta{display:flex; gap:8px; margin-top:22px; margin-bottom:14px; flex-wrap:wrap}
+.tab-consulta{background:#fff; color:var(--texto); border:1px solid var(--borde); border-radius:10px; padding:10px 16px; font-weight:700; font-size:13px}
+.tab-consulta.activo{background:var(--rojo); color:#fff; border-color:var(--rojo)}
 </style>
 </head>
 <body>
@@ -96,11 +101,20 @@ header .sub{font-size:12px; opacity:.85; margin-top:4px}
       <button class="btn" onclick="buscar()">BUSCAR</button>
     </div>
     <p class="msg" id="msg"></p>
+    <div class="tabs-consulta oculto" id="tabsConsulta">
+      <button class="tab-consulta activo" data-tab="tramite" onclick="cambiarTab('tramite')">🪪 Trámite de licencia</button>
+      <button class="tab-consulta" data-tab="papeletas" onclick="cambiarTab('papeletas')">🚦 Papeletas</button>
+    </div>
     <div id="resultados"></div>
+    <div id="resultadosPapeletas" class="oculto"></div>
 
     <div class="oficial-box">
       <p>¿Quieres verificar tu licencia directamente en el registro oficial del Estado Peruano?</p>
       <a class="btn-oficial" href="https://licencias.mtc.gob.pe/#/search" target="_blank" rel="noopener">🔗 Portal oficial del MTC (licencias.mtc.gob.pe)</a>
+    </div>
+    <div class="oficial-box">
+      <p>¿Quieres verificar tus papeletas directamente en el registro oficial del Estado Peruano?</p>
+      <a class="btn-oficial" href="https://scppp.mtc.gob.pe/" target="_blank" rel="noopener">🔗 Consulta oficial de papeletas (scppp.mtc.gob.pe)</a>
     </div>
   </div>
 
@@ -120,6 +134,14 @@ const ESTADOS = {
   observado:  { txt:"Trámite observado",  clase:"e-observado" },
   finalizado: { txt:"Trámite finalizado", clase:"e-finalizado" }
 };
+const EST_PAP = {
+  registrada: { txt:"Solicitud registrada correctamente.", etq:"REGISTRADA", color:"#F77F00", barra:15 },
+  revision:   { txt:"Solicitud en revisión.",              etq:"EN REVISIÓN", color:"#E5B700", barra:45 },
+  proceso:    { txt:"Solicitud en proceso.",               etq:"EN PROCESO",  color:"#F77F00", barra:75 },
+  finalizada: { txt:"Solicitud finalizada.",               etq:"FINALIZADA",  color:"#1B9E4B", barra:100 }
+};
+const NIVEL_COLOR = { "Muy Grave":"#D62828", "Grave":"#F77F00", "Leve":"#E5B700" };
+const soles = n => (!n) ? "—" : "S/ " + Number(n).toFixed(2);
 const $ = id => document.getElementById(id);
 const escapa = t => String(t ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -141,30 +163,82 @@ async function cargarDatos(){
   try{
     const r = await fetch("datos-publicos.json", { cache:"no-store" });
     if (!r.ok) throw new Error("no-ok");
-    datos = await r.json();
+    const crudo = await r.json();
+    // Compatibilidad: versiones viejas de datos-publicos.json eran un arreglo plano de trámites.
+    datos = Array.isArray(crudo) ? { tramites: crudo, papeletas: [] } : crudo;
   }catch(e){
     datos = null;
   }
 }
 cargarDatos();
 
+function cambiarTab(tab){
+  document.querySelectorAll("#tabsConsulta .tab-consulta").forEach(b => b.classList.toggle("activo", b.dataset.tab === tab));
+  $("resultados").classList.toggle("oculto", tab !== "tramite");
+  $("resultadosPapeletas").classList.toggle("oculto", tab !== "papeletas");
+}
+
+function renderPapeletas(dni){
+  const propias = (datos.papeletas || []).filter(s => s.dni === dni);
+  if (!propias.length) return `<div class="card"><p style="color:var(--gris);font-size:13px">No encontramos solicitudes de eliminación de papeletas registradas con ese DNI.</p></div>`;
+  return propias.map(s => {
+    const e = EST_PAP[s.estado] || { txt:s.estado, etq:s.estado, color:"#8B7F7F", barra:0 };
+    const totalPuntos = s.papeletas.reduce((a,p) => a + (p.puntos||0), 0);
+    const totalMulta = s.papeletas.reduce((a,p) => a + (p.multa||0), 0);
+    const barraHtml = s.estado !== "finalizada"
+      ? `<div style="background:var(--fondo);border-radius:8px;height:10px;overflow:hidden;margin:10px 0">
+          <div style="height:100%;width:${e.barra}%;background:${e.color};border-radius:8px;transition:width .6s"></div>
+        </div>`
+      : "";
+    return `<div class="tramite-card">
+      <div class="top">
+        <div>
+          <div class="tipo">Solicitud de eliminación de papeletas</div>
+          <div class="meta">${s.papeletas.length} papeleta(s) · Registrado el ${escapa(s.fechaRegistro)}</div>
+          <div class="meta">Última actualización: ${escapa(s.actualizado)}</div>
+        </div>
+        <span class="estado" style="background:${e.color}">${escapa(e.etq)}</span>
+      </div>
+      <p style="font-size:13px;margin-top:8px">${escapa(e.txt)}</p>
+      ${barraHtml}
+      <div class="docs-box">
+        <span class="et">Papeletas incluidas</span>
+        ${s.papeletas.map(p => `<span style="display:inline-block;background:${NIVEL_COLOR[p.nivel]||"#8B7F7F"};color:#fff;border-radius:12px;padding:3px 10px;margin:2px;font-weight:700;font-size:11px">${escapa(p.codigo)}</span>`).join("")}
+        <div style="margin-top:8px;font-size:12px;color:var(--gris)">Total: <b>${totalPuntos} puntos</b> · ${soles(totalMulta)} en multas</div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
 async function buscar(){
   const dni = $("dni").value.trim();
   const msg = $("msg");
   const res = $("resultados");
+  const resPap = $("resultadosPapeletas");
+  const tabs = $("tabsConsulta");
   res.innerHTML = "";
+  resPap.innerHTML = "";
+  tabs.classList.add("oculto");
   if (!/^\d{8}$/.test(dni)){ msg.textContent = "Ingresa un DNI válido de 8 dígitos."; return; }
   if (datos === null) await cargarDatos();
   if (datos === null){
     msg.textContent = "No se pudo cargar la información. Intenta más tarde o contáctanos.";
     return;
   }
-  const coincidencias = datos.filter(x => x.dni === dni);
-  if (!coincidencias.length){
-    msg.textContent = "No encontramos trámites registrados con ese DNI.";
+  const coincidencias = (datos.tramites || []).filter(x => x.dni === dni);
+  const tienePapeletas = (datos.papeletas || []).some(x => x.dni === dni);
+  if (!coincidencias.length && !tienePapeletas){
+    msg.textContent = "No encontramos trámites ni solicitudes registradas con ese DNI.";
     return;
   }
   msg.textContent = "";
+  tabs.classList.remove("oculto");
+  cambiarTab(coincidencias.length ? "tramite" : "papeletas");
+  resPap.innerHTML = renderPapeletas(dni);
+  if (!coincidencias.length){
+    res.innerHTML = `<div class="card"><p style="color:var(--gris);font-size:13px">Este DNI no tiene trámites de licencia registrados.</p></div>`;
+    return;
+  }
 
   const conductor = coincidencias[0];
   const panelConductor = `<div class="panel-mtc">
