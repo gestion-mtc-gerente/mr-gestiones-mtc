@@ -635,11 +635,11 @@ function parsearDNI(texto){
 // Reconstruye el texto usando la posición real de cada palabra en la imagen: agrupa por línea
 // según su altura y descarta la franja derecha (donde suele estar la foto) y palabras de baja
 // confianza (ruido de fondo, marcas de agua). Esto evita que el OCR mezcle columnas distintas.
-function reconstruirPorPosicion(data, anchoImagen){
+function reconstruirPorPosicion(data, anchoImagen, sinLimiteX){
   const palabrasOrig = (data && data.words) || [];
   if (!anchoImagen || !palabrasOrig.length) return null;
   const limiteX = anchoImagen * 0.6;
-  const palabras = palabrasOrig.filter(w => w.bbox && w.bbox.x0 < limiteX && (w.confidence == null || w.confidence > 35));
+  const palabras = palabrasOrig.filter(w => w.bbox && (sinLimiteX || w.bbox.x0 < limiteX) && (w.confidence == null || w.confidence > 35));
   if (!palabras.length) return null;
   palabras.sort((a, b) => a.bbox.y0 - b.bbox.y0);
   const lineas = [];
@@ -657,7 +657,7 @@ function reconstruirPorPosicion(data, anchoImagen){
 // Mejora la imagen antes de leerla: pasa a escala de grises y sube el contraste, para separar
 // mejor el texto de fondos con marca de agua/textura (como el papel de seguridad del DNI).
 // Si algo falla, se usa la imagen original tal cual.
-async function preprocesarImagen(file){
+async function preprocesarImagen(file, sinContraste){
   try{
     const bmp = await createImageBitmap(file);
     let w = bmp.width, h = bmp.height;
@@ -670,15 +670,21 @@ async function preprocesarImagen(file){
     const ctx = canvas.getContext("2d");
     ctx.drawImage(bmp, 0, 0, w, h);
     if (bmp.close) bmp.close();
-    const imgData = ctx.getImageData(0, 0, w, h);
-    const d = imgData.data;
-    const contraste = 1.5;
-    for (let i = 0; i < d.length; i += 4){
-      const gris = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-      const v = Math.max(0, Math.min(255, (gris - 128) * contraste + 128));
-      d[i] = d[i + 1] = d[i + 2] = v;
+    // El contraste centrado en gris medio ayuda con el papel de seguridad del DNI físico, pero
+    // en una captura de pantalla (texto de colores sobre fondo blanco, sin textura) puede volver
+    // casi invisibles colores cuyo gris equivalente cae cerca de ese punto medio (como el
+    // naranja). Para capturas de pantalla se salta este paso y solo se agranda la imagen.
+    if (!sinContraste){
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const d = imgData.data;
+      const contraste = 1.5;
+      for (let i = 0; i < d.length; i += 4){
+        const gris = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        const v = Math.max(0, Math.min(255, (gris - 128) * contraste + 128));
+        d[i] = d[i + 1] = d[i + 2] = v;
+      }
+      ctx.putImageData(imgData, 0, 0);
     }
-    ctx.putImageData(imgData, 0, 0);
     return await new Promise(resolve => {
       canvas.toBlob(blob => resolve(blob ? new File([blob], file.name, { type: "image/png" }) : file), "image/png");
     });
@@ -845,6 +851,9 @@ async function escanearDocumento(inputEl, targets, msgId){
 // aproximado — siempre se muestra editable para revisar antes de guardar.
 let filasOficialesEscaneadas = [];
 let infoOficialEscaneada = null;
+// Todas las etiquetas de esta pantalla, para no confundir una etiqueta con el valor de la
+// anterior cuando el OCR no detecta los dos puntos (":") — algo muy frecuente.
+const OTRA_ETIQUETA_PAP = /CONSULTA\s*DEL\s*ADMINISTRADO|NRO\.?\s*DE\s*DOCUMENTO|NRO\.?\s*DE\s*LICENCIA|CLASE\s*Y\s*CATEGORIA|VIGENTE\s*HASTA|ESTADO\s*DE\s*LA\s*LICENCIA|LISTADO\s*DE\s*PAPELETAS|^ENTIDAD\b|^PAPELETA\b|^FALTA\b|^RETENCION\b|^FIRME\b/i;
 function parsearConsultaPapeletas(texto){
   const lineas = String(texto || "").split("\n").map(l => l.trim()).filter(Boolean);
   const idx = re => lineas.findIndex(l => re.test(l));
@@ -852,17 +861,28 @@ function parsearConsultaPapeletas(texto){
     if (i < 0) return "";
     const linea = lineas[i];
     const m = linea.match(re);
+    // El valor "-" (sin dato) puede leerse como distintos tipos de raya según el OCR.
+    const esGuionSuelto = t => /^[-–—―‐]+$/.test(t);
     if (m){
-      const despues = linea.slice(m.index + m[0].length).replace(/^[:\-\s]+/, "").trim();
-      if (despues && despues !== "-") return despues;
-      if (despues === "-") return "";
+      const despues = linea.slice(m.index + m[0].length).replace(/^[:\-–—―‐\s]+/, "").trim();
+      if (despues && !esGuionSuelto(despues) && !OTRA_ETIQUETA_PAP.test(despues)) return despues;
+      if (esGuionSuelto(despues)) return "";
     }
     const sig = lineas[i + 1];
-    if (sig && !/^[A-ZÑÁÉÍÓÚ ]+:/.test(sig)) return sig === "-" ? "" : sig;
+    if (sig && !OTRA_ETIQUETA_PAP.test(sig)) return esGuionSuelto(sig) ? "" : sig;
     return "";
   }
-  const administrado = valorTrasEtiqueta(idx(/CONSULTA\s*DEL\s*ADMINISTRADO/i), /CONSULTA\s*DEL\s*ADMINISTRADO/i);
-  const dni = valorTrasEtiqueta(idx(/NRO\.?\s*DE\s*DOCUMENTO/i), /NRO\.?\s*DE\s*DOCUMENTO[^:]*/i);
+  const administradoCrudo = valorTrasEtiqueta(idx(/CONSULTA\s*DEL\s*ADMINISTRADO/i), /CONSULTA\s*DEL\s*ADMINISTRADO/i);
+  // Se quitan símbolos sueltos que a veces deja el lector al inicio (guiones, rayas) sin tocar
+  // el nombre real.
+  const administrado = administradoCrudo.replace(/^[^A-ZÑÁÉÍÓÚ]+/i, "").trim();
+  let dni = valorTrasEtiqueta(idx(/NRO\.?\s*DE\s*DOCUMENTO/i), /NRO\.?\s*DE\s*DOCUMENTO[^:]*/i);
+  // El DNI peruano son siempre 8 dígitos: si la etiqueta no dio un valor así de limpio, se busca
+  // en todo el texto cualquier número suelto de 8 dígitos como respaldo.
+  if (!/^\d{8}$/.test(dni)){
+    const m = String(texto || "").match(/\b\d{8}\b/);
+    if (m) dni = m[0];
+  }
   const numeroLicencia = valorTrasEtiqueta(idx(/NRO\.?\s*DE\s*LICENCIA/i), /NRO\.?\s*DE\s*LICENCIA/i);
   const claseCategoria = valorTrasEtiqueta(idx(/CLASE\s*Y\s*CATEGORIA/i), /CLASE\s*Y\s*CATEGORIA/i);
   const vigenteHasta = valorTrasEtiqueta(idx(/VIGENTE\s*HASTA/i), /VIGENTE\s*HASTA/i);
@@ -871,15 +891,32 @@ function parsearConsultaPapeletas(texto){
   // Tabla: busca la línea de cabecera ("ENTIDAD ... PAPELETA ... FECHA ...") y a partir de ahí
   // intenta leer cada fila. El formato real: N° ENTIDAD PAPELETA FECHA [FECHA FIRME] FALTA
   // ESTADO DEUDA [RESOLUCION] RETENCION(SI/NO).
-  const iCab = idx(/ENTIDAD/i);
+  // Anclado al inicio de línea con \b: "ENTIDAD" (sin anclar) también hace match dentro de
+  // "IDENTIDAD" (NRO. DE DOCUMENTO DE IDENTIDAD), lo que hacía arrancar la tabla demasiado
+  // pronto y confundía los campos de arriba con filas de la tabla.
+  const iCab = idx(/^ENTIDAD\b/i);
   const filas = [];
-  const RE_FILA = /^(\d+)\s+(.+?)\s+(\d{3,7})\s+(\d{2}\/\d{2}\/\d{4})\s*(\d{2}\/\d{2}\/\d{4})?\s*([A-Z]{1,2}\d{1,3}[A-Z]?)\s+(.+?)\s*(SI|NO)?$/i;
+  // El N° de fila inicial y la retención (SI/NO) son opcionales porque el OCR a veces no los
+  // detecta (o lee basura de un ícono al final de la fila); se toleran también restos sueltos
+  // al final de la línea sin que rompan la lectura de lo demás.
+  // El código de falta normalmente empieza con 1-2 letras (M28, G12, L05), pero se acepta que
+  // falten esas letras (0) porque el lector a veces confunde una letra con un número parecido
+  // (la "G" con "6", la "O" con "0", etc.) — mejor detectar el resto de la fila igual y que se
+  // corrija el código a mano, que perder toda la fila por esa sola confusión.
+  const RE_FILA = /^(?:(\d+)\s+)?(.+?)\s+(\d{3,7})\s+(\d{2}\/\d{2}\/\d{4})\s*(\d{2}\/\d{2}\/\d{4})?\s*([A-Z]{0,2}\d{1,3}[A-Z]?)\s+(.+?)\s*\b(SI|NO)?\b[^A-Za-z0-9]*$/i;
   if (iCab >= 0){
     for (let j = iCab + 1; j < lineas.length; j++){
       const l = lineas[j];
       if (/Desarrollado\s*por/i.test(l)) break;
+      if (/^(ENTIDAD|PAPELETA|FECHA|FALTA|ESTADO\s*DEUDA|RESOLUCION|RETENCION|FIRME|LICENCIA)\b/i.test(l)) continue;
       const m = l.match(RE_FILA);
-      if (!m) continue;
+      if (!m){
+        // No calzó el patrón esperado: si la línea tiene contenido real (no es ruido suelto de
+        // 1-2 caracteres), se guarda igual completa en "Entidad" para no perder el dato — mejor
+        // corregirla a mano que no tenerla.
+        if (l.length >= 5) filas.push({ entidad: l, papeleta: "", fecha: "", fechaFirme: "", falta: "", estadoDeuda: "", resolucion: "", retencion: "NO" });
+        continue;
+      }
       filas.push({
         entidad: m[2].trim(),
         papeleta: m[3].trim(),
@@ -952,7 +989,7 @@ async function escanearConsultaOficial(inputEl){
   msg.style.color = "var(--gris)";
   msg.textContent = "Leyendo documento… 0%";
   try{
-    const archivo = await preprocesarImagen(f);
+    const archivo = await preprocesarImagen(f, true);
     let anchoImagen = 0;
     try{
       const bmp = await createImageBitmap(archivo);
@@ -962,8 +999,23 @@ async function escanearConsultaOficial(inputEl){
     const { data } = await Tesseract.recognize(archivo, "spa", {
       logger: m => { if (m.status === "recognizing text") msg.textContent = "Leyendo documento… " + Math.round(m.progress * 100) + "%"; }
     });
-    const textoPosicion = reconstruirPorPosicion(data, anchoImagen);
-    const info = parsearConsultaPapeletas(textoPosicion || data.text);
+    // Sin límite de ancho: a diferencia del DNI, aquí la mitad derecha de la imagen tiene
+    // columnas con datos (Estado deuda, Resolución, Retención), no una foto que descartar.
+    const textoPosicion = reconstruirPorPosicion(data, anchoImagen, true);
+    // Se prueban las dos versiones del texto (la del OCR tal cual y la reconstruida por
+    // posición) y se combina lo mejor de cada una — igual que con el DNI, porque según la
+    // foto una u otra detecta mejor cada dato.
+    const infoTexto = parsearConsultaPapeletas(data.text);
+    const infoPosicion = textoPosicion ? parsearConsultaPapeletas(textoPosicion) : { filas:[] };
+    const info = {
+      administrado: infoTexto.administrado || infoPosicion.administrado || "",
+      dni: infoTexto.dni || infoPosicion.dni || "",
+      numeroLicencia: infoTexto.numeroLicencia || infoPosicion.numeroLicencia || "",
+      claseCategoria: infoTexto.claseCategoria || infoPosicion.claseCategoria || "",
+      vigenteHasta: infoTexto.vigenteHasta || infoPosicion.vigenteHasta || "",
+      estadoLicencia: infoTexto.estadoLicencia || infoPosicion.estadoLicencia || "",
+      filas: infoPosicion.filas.length >= infoTexto.filas.length ? infoPosicion.filas : infoTexto.filas
+    };
     let encontrado = false;
     if (info.dni && $("pDni") && !$("pDni").value.trim()){ $("pDni").value = info.dni; encontrado = true; }
     if (info.administrado){
@@ -979,12 +1031,15 @@ async function escanearConsultaOficial(inputEl){
     infoOficialEscaneada = { numeroLicencia: info.numeroLicencia, claseCategoria: info.claseCategoria, vigenteHasta: info.vigenteHasta, estadoLicencia: info.estadoLicencia };
     if (filasOficialesEscaneadas.length) encontrado = true;
     renderTablaOficialEditable();
+    const textoEscapado1 = escapa((data.text||"").trim()).replace(/\n/g, "<br>");
+    const textoEscapado2 = escapa((textoPosicion||"").trim()).replace(/\n/g, "<br>");
+    const bloqueTexto = `<div style="margin-top:6px"><button type="button" class="link" style="font-size:11px" onclick="const d=document.getElementById('pScanOficialRaw'); d.classList.toggle('oculto')">👁️ Ver texto que detectó el lector</button><div id="pScanOficialRaw" class="oculto" style="background:#fff;border:1px solid var(--borde);border-radius:8px;padding:8px 10px;margin-top:6px;font-size:11px;color:var(--texto);max-height:180px;overflow-y:auto"><b>Texto (OCR):</b><br>${textoEscapado1 || "(vacío)"}<hr style="margin:8px 0;border:none;border-top:1px solid var(--borde)"><b>Texto (por posición):</b><br>${textoEscapado2 || "(vacío)"}</div></div>`;
     if (encontrado){
       msg.style.color = "var(--verde)";
-      msg.innerHTML = `✓ Datos detectados (${filasOficialesEscaneadas.length} papeleta${filasOficialesEscaneadas.length===1?"":"s"} en la tabla). Revisa y corrige cualquier dato antes de registrar — el lector puede equivocarse, sobre todo en la tabla.`;
+      msg.innerHTML = `✓ Datos detectados (${filasOficialesEscaneadas.length} papeleta${filasOficialesEscaneadas.length===1?"":"s"} en la tabla). Revisa y corrige cualquier dato antes de registrar — el lector puede equivocarse, sobre todo en la tabla.` + bloqueTexto;
     } else {
       msg.style.color = "var(--rojo)";
-      msg.textContent = "No se pudo leer la tabla automáticamente. Agrega las filas manualmente con el botón de abajo.";
+      msg.innerHTML = "No se pudo leer la tabla automáticamente. Agrega las filas manualmente con el botón de abajo, o revisa lo que alcanzó a leer el lector." + bloqueTexto;
       renderTablaOficialEditable();
     }
   }catch(e){
