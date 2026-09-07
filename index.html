@@ -111,10 +111,14 @@ main{flex:1; padding:22px; min-width:0}
 .usuario-chip .rol{font-size:10px; background:var(--rojo-suave); color:var(--rojo); padding:2px 8px; border-radius:10px; letter-spacing:1px}
 .uc-textos{display:flex; flex-direction:column; line-height:1.25}
 .uc-cargo{font-size:10px; font-weight:600; color:var(--gris); text-transform:uppercase; letter-spacing:.3px}
-.uc-avatar{width:30px; height:30px; border-radius:50%; overflow:hidden; background:var(--rojo-suave); color:var(--rojo); display:flex; align-items:center; justify-content:center; font-size:15px; flex-shrink:0}
+.uc-avatar{width:46px; height:46px; border-radius:50%; overflow:hidden; background:var(--rojo-suave); color:var(--rojo); display:flex; align-items:center; justify-content:center; font-size:22px; flex-shrink:0}
 .uc-avatar img{width:100%; height:100%; object-fit:cover}
-.uc-avatar-grande{width:72px; height:72px; border-radius:50%; overflow:hidden; background:var(--rojo-suave); color:var(--rojo); display:flex; align-items:center; justify-content:center; font-size:32px; flex-shrink:0}
+.uc-avatar-grande{width:110px; height:110px; border-radius:50%; overflow:hidden; background:var(--rojo-suave); color:var(--rojo); display:flex; align-items:center; justify-content:center; font-size:48px; flex-shrink:0}
 .uc-avatar-grande img{width:100%; height:100%; object-fit:cover}
+.login-perfil{display:flex; flex-direction:column; align-items:center; gap:6px; margin:18px 0 22px}
+.login-perfil .uc-avatar-grande{border:3px solid #fff; box-shadow:0 2px 10px rgba(0,0,0,.12)}
+.login-perfil-nombre{font-size:17px; font-weight:800; color:var(--texto,#222); min-height:20px}
+.login-perfil .uc-cargo{font-size:11px}
 #btnMenu{display:none; background:var(--rojo); color:#fff; border:none; border-radius:10px; padding:10px 14px; font-size:16px}
 
 /* ===== DASHBOARD ===== */
@@ -207,8 +211,13 @@ h1.titulo-vista{font-size:22px; font-weight:900; margin-bottom:16px}
   <div class="login-box">
     <h1>GESTIÓN MTC</h1>
     <p class="sub">Sistema de trámites administrativos</p>
+    <div class="login-perfil">
+      <div class="uc-avatar-grande" id="loginAvatar">👤</div>
+      <div class="login-perfil-nombre" id="loginAvatarNombre"></div>
+      <div class="uc-cargo" id="loginAvatarCargo"></div>
+    </div>
     <label>USUARIO</label>
-    <input id="logUser" placeholder="Nombre de usuario" autocomplete="username">
+    <input id="logUser" placeholder="Nombre de usuario" autocomplete="username" oninput="actualizarAvatarLogin()">
     <label>CONTRASEÑA</label>
     <input id="logPass" type="password" placeholder="••••••••" autocomplete="current-password">
     <div class="check-linea">
@@ -466,6 +475,15 @@ function cerrarSesion(){
   $("app").classList.add("oculto");
   $("pantallaLogin").classList.remove("oculto");
   $("logPass").value = "";
+  $("logUser").value = "";
+  actualizarAvatarLogin();
+}
+function actualizarAvatarLogin(){
+  const val = $("logUser").value.trim();
+  const u = usuarios.find(x => x.user === val);
+  $("loginAvatar").innerHTML = (u && u.foto) ? `<img src="${u.foto}">` : "👤";
+  $("loginAvatarNombre").textContent = u ? u.nombre : "";
+  $("loginAvatarCargo").textContent = u ? (u.cargo || "") : "";
 }
 let fotoPerfilPendiente = undefined;
 function abrirEditarUsuario(i){
