@@ -7,6 +7,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
 <style>
 :root{
   --rojo:#D62828; --rojo-osc:#A31F1F; --rojo-suave:#FDECEC;
@@ -282,6 +285,64 @@ const $ = id => document.getElementById(id);
 const lee = (k, def) => { try { return JSON.parse(localStorage.getItem(k)) ?? def; } catch(e){ return def; } };
 const guarda = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 const escapa = t => String(t ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// ---------- Firebase: sincronización de trámites y solicitudes entre dispositivos ----------
+// Si Firebase no carga (sin internet, bloqueado, etc.) el sistema sigue funcionando normal,
+// solo con los datos guardados en este dispositivo — nubeConectada queda en false y las
+// funciones de sincronización no hacen nada.
+const firebaseConfig = {
+  apiKey: "AIzaSyA6VtplK2yA0jarjEcLz1Y4PT7EsA_zaDA",
+  authDomain: "mtc-gestion-666ee.firebaseapp.com",
+  projectId: "mtc-gestion-666ee",
+  storageBucket: "mtc-gestion-666ee.firebasestorage.app",
+  messagingSenderId: "362415983939",
+  appId: "1:362415983939:web:34a7b127a00c190d1e73f6"
+};
+let nubeConectada = false;
+let dbCloud = null;
+try{
+  if (typeof firebase !== "undefined"){
+    firebase.initializeApp(firebaseConfig);
+    dbCloud = firebase.firestore();
+    firebase.auth().signInAnonymously().catch(err => console.error("Firebase auth:", err));
+    firebase.auth().onAuthStateChanged(user => {
+      if (user && !nubeConectada){
+        nubeConectada = true;
+        iniciarSincronizacionNube();
+      }
+    });
+  }
+}catch(_e){ /* sin nube, el sistema sigue funcionando solo en este dispositivo */ }
+
+async function iniciarSincronizacionNube(){
+  // Primera vez: si la nube está vacía pero este dispositivo ya tiene datos guardados
+  // localmente, se suben una sola vez para no perderlos (en vez de que la nube vacía los borre
+  // de la pantalla).
+  try{
+    const [snapExp, snapSol] = await Promise.all([
+      dbCloud.collection("expedientes").limit(1).get(),
+      dbCloud.collection("solicitudes").limit(1).get()
+    ]);
+    if (snapExp.empty && expedientes.length) await Promise.all(expedientes.map(e => dbCloud.collection("expedientes").doc(e.id).set(e)));
+    if (snapSol.empty && solicitudes.length) await Promise.all(solicitudes.map(s => dbCloud.collection("solicitudes").doc(s.id).set(s)));
+  }catch(err){ console.error("Migración inicial a la nube:", err); }
+
+  dbCloud.collection("expedientes").onSnapshot(snap => {
+    expedientes = snap.docs.map(d => d.data()).sort((a,b) => (b.registroMs||0) - (a.registroMs||0));
+    guarda("mtc_expedientes", expedientes);
+    if (sesion) irVista(vistaActual);
+  }, err => console.error("Firestore expedientes:", err));
+
+  dbCloud.collection("solicitudes").onSnapshot(snap => {
+    solicitudes = snap.docs.map(d => d.data()).sort((a,b) => (b.creadoMs||0) - (a.creadoMs||0));
+    guarda("mtc_solicitudes", solicitudes);
+    if (sesion) irVista(vistaActual);
+  }, err => console.error("Firestore solicitudes:", err));
+}
+function guardarExpedienteNube(e){ if (nubeConectada && e) dbCloud.collection("expedientes").doc(e.id).set(e).catch(err => console.error("Guardar expediente en la nube:", err)); }
+function eliminarExpedienteNube(id){ if (nubeConectada) dbCloud.collection("expedientes").doc(id).delete().catch(err => console.error("Eliminar expediente en la nube:", err)); }
+function guardarSolicitudNube(s){ if (nubeConectada && s) dbCloud.collection("solicitudes").doc(s.id).set(s).catch(err => console.error("Guardar solicitud en la nube:", err)); }
+function eliminarSolicitudNube(id){ if (nubeConectada) dbCloud.collection("solicitudes").doc(id).delete().catch(err => console.error("Eliminar solicitud en la nube:", err)); }
 const ahora = () => new Date().toLocaleString("es-PE", {day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 function abrirVentana(){
   const w = window.open("", "_blank");
@@ -1223,6 +1284,7 @@ async function guardarExpediente(id){
     fotoEscaneada = null;
   }
   guarda("mtc_expedientes", expedientes);
+  guardarExpedienteNube(id ? expedientes.find(x => x.id === id) : expedientes[0]);
   await ocultarCargando();
   cerrarModal();
   irVista(vistaActual);
@@ -1232,6 +1294,7 @@ function eliminarExp(id){
   if (!confirm(`¿Eliminar el expediente de ${e.nombres} ${e.apellidos}? Esta acción no se puede deshacer.`)) return;
   expedientes = expedientes.filter(x => x.id !== id);
   guarda("mtc_expedientes", expedientes);
+  eliminarExpedienteNube(id);
   log(`Eliminó expediente DNI ${e.dni}`);
   irVista(vistaActual);
 }
@@ -1248,6 +1311,7 @@ function subirDoc(id){
     e.docs.push({ nombre: f.name, data: r.result });
     e.historial.unshift({ fecha: ahora(), usuario: sesion.nombre, accion: "Subió documento: " + f.name });
     guarda("mtc_expedientes", expedientes);
+    guardarExpedienteNube(e);
     log(`Subió documento a DNI ${e.dni}`);
     await ocultarCargando();
     abrirExpediente(id);
@@ -1264,6 +1328,7 @@ function borrarDoc(id, i){
   if (!confirm("¿Eliminar el documento " + e.docs[i].nombre + "?")) return;
   e.docs.splice(i,1);
   guarda("mtc_expedientes", expedientes);
+  guardarExpedienteNube(e);
   abrirExpediente(id);
 }
 // ---------- Requisitos adicionales (exámenes / COFIPRO) ----------
@@ -1282,6 +1347,7 @@ function subirRequisito(id, campo, inputEl){
     const etiqueta = campo === "examenes" ? "los exámenes (manejo, conocimientos y médico)" : "el certificado de COFIPRO";
     e.historial.unshift({ fecha: ahora(), usuario: sesion.nombre, accion: "Subió " + etiqueta + ": " + f.name });
     guarda("mtc_expedientes", expedientes);
+    guardarExpedienteNube(e);
     log(`Subió ${campo === "examenes" ? "exámenes" : "COFIPRO"} a DNI ${e.dni}`);
     await ocultarCargando();
     abrirExpediente(id);
@@ -1301,6 +1367,7 @@ function quitarRequisito(id, campo){
   // cumplido (recién se pide DESPUÉS de subir los exámenes), así que también se limpia.
   if (campo === "examenes") e.cofipro = null;
   guarda("mtc_expedientes", expedientes);
+  guardarExpedienteNube(e);
   log(`Quitó ${campo === "examenes" ? "exámenes" : "COFIPRO"} de DNI ${e.dni}`);
   abrirExpediente(id);
 }
@@ -1314,6 +1381,7 @@ function subirFoto(id){
     const e = expedientes.find(x => x.id === id);
     e.foto = r.result;
     guarda("mtc_expedientes", expedientes);
+    guardarExpedienteNube(e);
     log(`Actualizó foto de DNI ${e.dni}`);
     await ocultarCargando();
     abrirExpediente(id);
@@ -2206,6 +2274,7 @@ function registrarSolicitud(){
   };
   solicitudes.unshift(s);
   guarda("mtc_solicitudes", solicitudes);
+  guardarSolicitudNube(s);
   log(`Registró solicitud de papeletas · DNI ${dni} (${sel.length})`);
   notificar(`Nueva solicitud de papeletas: ${nom} ${ape} (${sel.length} papeleta/s)`);
   msg.style.color="var(--verde)"; msg.textContent="Solicitud registrada ✓";
@@ -2287,6 +2356,7 @@ function confirmarPagoPapeleta(id){
   s.pagoConfirmadoMs = Date.now();
   s.historial.unshift({ fecha: ahora(), usuario: sesion.nombre, accion: "Confirmó el pago del trámite de eliminación (inicia 24h)" });
   guarda("mtc_solicitudes", solicitudes);
+  guardarSolicitudNube(s);
   log(`Confirmó pago de eliminación de papeleta · DNI ${s.dni}`);
   irVista(vistaActual);
 }
@@ -2376,6 +2446,7 @@ function cambiarEstadoSol(id, nuevo){
   s.estado = nuevo; s.actualizado = ahora();
   s.historial.unshift({ fecha: ahora(), usuario: sesion.nombre, accion:"Cambió el estado a " + EST_PAP[nuevo].etq });
   guarda("mtc_solicitudes", solicitudes);
+  guardarSolicitudNube(s);
   log(`Cambió estado de solicitud DNI ${s.dni} → ${EST_PAP[nuevo].etq}`);
   notificar(`Solicitud de ${s.nombres} ${s.apellidos}: ${EST_PAP[nuevo].txt}`);
   pintarPapeletas();
@@ -2386,6 +2457,7 @@ function eliminarSolicitud(id){
   if (!confirm(`¿Eliminar la solicitud de ${s.nombres} ${s.apellidos}?`)) return;
   solicitudes = solicitudes.filter(x => x.id !== id);
   guarda("mtc_solicitudes", solicitudes);
+  eliminarSolicitudNube(id);
   log(`Eliminó solicitud de papeletas DNI ${s.dni}`);
   pintarPapeletas();
 }
@@ -2607,17 +2679,18 @@ function guardarCfgPap(){
 }
 function motorPapeletas(){
   if (!cfgPap.activo) return;
-  let cambio = false;
+  const cambiadas = [];
   solicitudes.forEach(s => {
     if (s.estado !== cfgPap.destino && s.estado !== "finalizada" && Date.now() >= limiteMs(s)){
       s.estado = cfgPap.destino; s.actualizado = ahora();
       s.historial.unshift({ fecha: ahora(), usuario:"Sistema (automático)", accion:"Cambio automático a " + EST_PAP[cfgPap.destino].etq });
       notificar(`⚙️ Automático: solicitud de ${s.nombres} ${s.apellidos} → ${EST_PAP[cfgPap.destino].etq}`);
-      cambio = true;
+      cambiadas.push(s);
     }
   });
-  if (cambio){
+  if (cambiadas.length){
     guarda("mtc_solicitudes", solicitudes);
+    cambiadas.forEach(guardarSolicitudNube);
     if (sesion && vistaActual === "papeletas") pintarPapeletas();
   }
 }
@@ -2648,17 +2721,18 @@ function busquedaGlobal(){
 function motorAutomatico(){
   if (!config.autoActivo) return;
   const limite = config.autoHoras * 3600000;
-  let cambio = false;
+  const cambiadas = [];
   expedientes.forEach(e => {
     if (e.estado === "tramite" && e.registroMs && Date.now() - e.registroMs >= limite){
       e.estado = config.autoDestino;
       e.historial.unshift({ fecha: ahora(), usuario:"Sistema (automático)", accion:"Cambio automático a " + ESTADOS[config.autoDestino].txt });
       notificar(`⚙️ Automático: el trámite de ${e.nombres} ${e.apellidos} pasó a ${ESTADOS[config.autoDestino].txt}`);
-      cambio = true;
+      cambiadas.push(e);
     }
   });
-  if (cambio){
+  if (cambiadas.length){
     guarda("mtc_expedientes", expedientes);
+    cambiadas.forEach(guardarExpedienteNube);
     auditoria.unshift({ fecha: ahora(), usuario:"Sistema", accion:"Cambios automáticos de estado aplicados" });
     guarda("mtc_auditoria", auditoria);
     if (sesion) irVista(vistaActual);
@@ -2832,11 +2906,12 @@ function importarBackup(inp){
       expedientes = d.expedientes || []; usuarios = d.usuarios || usuarios;
       auditoria = d.auditoria || []; notifs = d.notifs || []; config = d.config || config;
       if (d.plantillas) { plantillas = d.plantillas; guarda("mtc_plantillas", plantillas); }
-      if (d.solicitudes) { solicitudes = d.solicitudes; guarda("mtc_solicitudes", solicitudes); }
+      if (d.solicitudes) { solicitudes = d.solicitudes; guarda("mtc_solicitudes", solicitudes); solicitudes.forEach(guardarSolicitudNube); }
       if (d.catalogo) { catalogo = d.catalogo; guarda("mtc_catalogo_v2", catalogo); }
       if (d.cfgPap) { cfgPap = d.cfgPap; guarda("mtc_cfgpap", cfgPap); }
       guarda("mtc_expedientes", expedientes); guarda("mtc_usuarios", usuarios);
       guarda("mtc_auditoria", auditoria); guarda("mtc_notifs", notifs); guarda("mtc_config", config);
+      expedientes.forEach(guardarExpedienteNube);
       log("Restauró copia de seguridad del " + (d.fecha || "?"));
       alert("Copia restaurada correctamente.");
       irVista("dashboard");
