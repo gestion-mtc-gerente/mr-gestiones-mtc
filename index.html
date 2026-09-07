@@ -1018,14 +1018,20 @@ async function escanearConsultaOficial(inputEl){
     };
     let encontrado = false;
     if (info.dni && $("pDni") && !$("pDni").value.trim()){ $("pDni").value = info.dni; encontrado = true; }
-    if (info.administrado){
-      const partes = info.administrado.split(/\s+/);
-      if (partes.length >= 2 && $("pNom") && !$("pNom").value.trim() && $("pApe") && !$("pApe").value.trim()){
-        // El portal oficial junta todo el nombre; se deja completo en Nombres para no adivinar
-        // mal dónde empiezan los apellidos, y se puede repartir a mano si hace falta.
-        $("pNom").value = info.administrado;
-        encontrado = true;
+    if (info.administrado && $("pNom") && !$("pNom").value.trim() && $("pApe") && !$("pApe").value.trim()){
+      const partes = info.administrado.split(/\s+/).filter(Boolean);
+      // El portal oficial siempre ordena el nombre igual que el DNI: Apellido Paterno,
+      // Apellido Materno y luego los Nombres (que pueden ser uno o varios).
+      if (partes.length >= 3){
+        $("pApe").value = partes.slice(0, 2).join(" ");
+        $("pNom").value = partes.slice(2).join(" ");
+      } else if (partes.length === 2){
+        $("pApe").value = partes[0];
+        $("pNom").value = partes[1];
+      } else if (partes.length === 1){
+        $("pNom").value = partes[0];
       }
+      encontrado = true;
     }
     filasOficialesEscaneadas = info.filas;
     infoOficialEscaneada = { numeroLicencia: info.numeroLicencia, claseCategoria: info.claseCategoria, vigenteHasta: info.vigenteHasta, estadoLicencia: info.estadoLicencia };
