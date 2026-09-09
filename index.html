@@ -414,7 +414,8 @@ let usuarios     = lee("mtc_usuarios", []);
 let expedientes  = lee("mtc_expedientes", []);
 let auditoria    = lee("mtc_auditoria", []);
 let notifs       = lee("mtc_notifs", []);
-let config       = lee("mtc_config", { autoActivo:false, autoHoras:24, autoDestino:"aprobado" });
+let config       = lee("mtc_config", { autoActivo:false, autoHoras:24, autoMinutos:0, autoDestino:"aprobado" });
+function limiteAutoMs(){ return config.autoHoras * 3600000 + (config.autoMinutos||0) * 60000; }
 let logoEmpresa  = lee("mtc_logo", null);
 let sesion       = null;
 let vistaActual  = "dashboard";
@@ -710,21 +711,32 @@ function filtrados(tipo){
 // Cronómetro visible de "Trámite en proceso" → automáticamente "Trámite aprobado" (por defecto
 // 24 horas, configurable en Automatización). Solo se ve/corre mientras esa automatización esté
 // activa; motorAutomatico() es quien de verdad hace el cambio de estado cuando se cumple el plazo.
+// El cronómetro tiene dos etapas para Nueva licencia / Recategorización (las que piden
+// exámenes + COFIPRO): 1) desde que se registra el trámite hasta que queda "observado"
+// pidiendo el COFIPRO, y 2) desde que se sube el COFIPRO hasta que queda "aprobado". Los
+// demás tipos de trámite solo tienen la etapa 1, directo al estado configurado.
+const REQUIERE_COFIPRO = new Set(["nueva", "recategorizacion"]);
+function origenCronoExp(e){
+  if (e.estado === "tramite" && e.registroMs) return e.registroMs;
+  if (e.estado === "observado" && e.cofiproSubidoMs && !e.cofiproAprobadoMs) return e.cofiproSubidoMs;
+  return null;
+}
 function fraccionExp(e){
-  if (!e.registroMs) return 0;
-  const total = config.autoHoras * 3600000;
-  return Math.min(1, Math.max(0, (Date.now() - e.registroMs) / total));
+  const origen = origenCronoExp(e);
+  if (!origen) return 0;
+  return Math.min(1, Math.max(0, (Date.now() - origen) / limiteAutoMs()));
 }
 function porcentajeVisualExp(e){
   const p = fraccionExp(e);
   return Math.round(100 * (1 - Math.pow(1 - p, 3)));
 }
 function tickCronoExp(){
-  const limite = config.autoHoras * 3600000;
+  const limite = limiteAutoMs();
   document.querySelectorAll(".crono-exp").forEach(el => {
     const e = expedientes.find(x => x.id === el.dataset.id);
-    if (!e || !e.registroMs){ el.textContent = "--:--:--"; return; }
-    const r = (e.registroMs + limite) - Date.now();
+    const origen = e ? origenCronoExp(e) : null;
+    if (!origen){ el.textContent = "--:--:--"; return; }
+    const r = (origen + limite) - Date.now();
     if (r <= 0){ el.textContent = "00:00:00"; return; }
     const h = Math.floor(r/3600000), m = Math.floor(r%3600000/60000), sg = Math.floor(r%60000/1000);
     el.textContent = [h,m,sg].map(n => String(n).padStart(2,"0")).join(":");
@@ -739,7 +751,10 @@ function pintarTabla(){
   if (!tb) return;
   if (cronoTimerExp){ clearInterval(cronoTimerExp); cronoTimerExp = null; }
   const lista = filtrados(vistaActual);
-  tb.innerHTML = lista.map(e => `
+  tb.innerHTML = lista.map(e => {
+    const corriendo = config.autoActivo && origenCronoExp(e);
+    const faltaCofipro = e.estado === "observado" && REQUIERE_COFIPRO.has(e.tipo) && !e.cofiproSubidoMs;
+    return `
     <tr>
       <td><b>${escapa(e.dni)}</b></td>
       <td>${escapa(e.nombres)} ${escapa(e.apellidos)}</td>
@@ -748,11 +763,13 @@ function pintarTabla(){
       <td>${escapa(e.responsable)}</td>
       <td>
         <span class="estado ${ESTADOS[e.estado].clase}">${ESTADOS[e.estado].txt}</span>
-        ${e.estado === "tramite" && config.autoActivo && e.registroMs ? `
+        ${corriendo ? `
         <div class="mini-crono">
           <b class="crono-exp" data-id="${e.id}">--:--:--</b>
           <div class="mini-barra"><div class="mini-relleno" data-id="${e.id}" style="width:${porcentajeVisualExp(e)}%"></div></div>
-        </div>` : (e.aprobadoAutoTexto ? `<div class="mini-crono"><b style="color:var(--verde)">✓ ${escapa(e.aprobadoAutoTexto)}</b></div>` : "")}
+        </div>` : faltaCofipro
+          ? `<div class="mini-crono"><b style="color:var(--rojo-osc)">⚠ Falta subir el examen COFIPRO</b></div>`
+          : (e.aprobadoAutoTexto ? `<div class="mini-crono"><b style="color:var(--verde)">✓ ${escapa(e.aprobadoAutoTexto)}</b></div>` : "")}
       </td>
       <td class="acciones">
         <button title="Ver / Editar" onclick="abrirExpediente('${e.id}')">✏️</button>
@@ -761,8 +778,9 @@ function pintarTabla(){
         <button title="Imprimir expediente" onclick="imprimirExp('${e.id}')">🖨️</button>
         <button title="Eliminar" onclick="eliminarExp('${e.id}')">🗑️</button>
       </td>
-    </tr>`).join("") || `<tr><td colspan="7" style="text-align:center;color:var(--gris);padding:24px">No hay trámites que coincidan.</td></tr>`;
-  if (config.autoActivo && lista.some(e => e.estado === "tramite")) cronoTimerExp = setInterval(tickCronoExp, 1000);
+    </tr>`;
+  }).join("") || `<tr><td colspan="7" style="text-align:center;color:var(--gris);padding:24px">No hay trámites que coincidan.</td></tr>`;
+  if (config.autoActivo && lista.some(e => origenCronoExp(e))) cronoTimerExp = setInterval(tickCronoExp, 1000);
 }
 
 
@@ -1564,6 +1582,11 @@ function subirRequisito(id, campo, inputEl){
   r.onload = async () => {
     const e = expedientes.find(x => x.id === id);
     e[campo] = { nombre: f.name, data: r.result };
+    if (campo === "cofipro"){
+      // Arranca (o reinicia, si se vuelve a subir) el segundo cronómetro hacia "aprobado".
+      e.cofiproSubidoMs = Date.now();
+      e.cofiproAprobadoMs = null;
+    }
     e.historial.unshift({ fecha: ahora(), usuario: sesion.nombre, accion: "Subió " + REQUISITO_ETIQUETAS[campo] + ": " + f.name });
     guarda("mtc_expedientes", expedientes);
     guardarExpedienteNube(e);
@@ -1585,6 +1608,9 @@ function quitarRequisito(id, campo){
   // Si se quita el archivo de exámenes, el COFIPRO deja de tener sentido como requisito ya
   // cumplido (recién se pide DESPUÉS de subir los exámenes), así que también se limpia.
   if (campo === "examenes") e.cofipro = null;
+  // Al quitar el COFIPRO (directo, o en cascada por quitar exámenes) se detiene el segundo
+  // cronómetro hacia "aprobado" — recién vuelve a arrancar cuando se suba de nuevo.
+  if (campo === "examenes" || campo === "cofipro"){ e.cofiproSubidoMs = null; e.cofiproAprobadoMs = null; }
   guarda("mtc_expedientes", expedientes);
   guardarExpedienteNube(e);
   log(`Quitó ${campo} de DNI ${e.dni}`);
@@ -3069,16 +3095,38 @@ function busquedaGlobal(){
 // ---------- Automatización de estados ----------
 async function motorAutomatico(){
   if (!config.autoActivo) return;
-  const limite = config.autoHoras * 3600000;
+  const limite = limiteAutoMs();
   const cambiadas = [];
   expedientes.forEach(e => {
+    // Etapa 1: "Trámite en proceso" → si es Nueva licencia/Recategorización queda "observado"
+    // pidiendo el COFIPRO; los demás tipos pasan directo al estado configurado.
     if (e.estado === "tramite" && e.registroMs && Date.now() - e.registroMs >= limite){
-      e.estado = config.autoDestino;
       const fechaCambio = ahora();
+      if (REQUIERE_COFIPRO.has(e.tipo)){
+        e.estado = "observado";
+        e.aprobadoAutoMs = Date.now();
+        e.aprobadoAutoTexto = "Trámite observado automáticamente el " + fechaCambio + " — falta subir el examen de COFIPRO";
+        e.historial.unshift({ fecha: fechaCambio, usuario:"Sistema (automático)", accion:"Cambio automático a Trámite observado (falta COFIPRO)" });
+        notificar(`⚙️ Automático: el trámite de ${e.nombres} ${e.apellidos} quedó observado — falta subir el examen de COFIPRO`);
+      } else {
+        e.estado = config.autoDestino;
+        e.aprobadoAutoMs = Date.now();
+        e.aprobadoAutoTexto = ESTADOS[config.autoDestino].txt + " automáticamente el " + fechaCambio;
+        e.historial.unshift({ fecha: fechaCambio, usuario:"Sistema (automático)", accion:"Cambio automático a " + ESTADOS[config.autoDestino].txt });
+        notificar(`⚙️ Automático: el trámite de ${e.nombres} ${e.apellidos} pasó a ${ESTADOS[config.autoDestino].txt}`);
+      }
+      cambiadas.push(e);
+      return;
+    }
+    // Etapa 2: una vez subido el COFIPRO, tras el mismo plazo configurado, queda "aprobado".
+    if (e.estado === "observado" && e.cofiproSubidoMs && !e.cofiproAprobadoMs && Date.now() - e.cofiproSubidoMs >= limite){
+      const fechaCambio = ahora();
+      e.estado = "aprobado";
+      e.cofiproAprobadoMs = Date.now();
       e.aprobadoAutoMs = Date.now();
-      e.aprobadoAutoTexto = ESTADOS[config.autoDestino].txt + " automáticamente el " + fechaCambio;
-      e.historial.unshift({ fecha: fechaCambio, usuario:"Sistema (automático)", accion:"Cambio automático a " + ESTADOS[config.autoDestino].txt });
-      notificar(`⚙️ Automático: el trámite de ${e.nombres} ${e.apellidos} pasó a ${ESTADOS[config.autoDestino].txt}`);
+      e.aprobadoAutoTexto = "Trámite aprobado automáticamente el " + fechaCambio;
+      e.historial.unshift({ fecha: fechaCambio, usuario:"Sistema (automático)", accion:"Cambio automático a Trámite aprobado (tras subir COFIPRO)" });
+      notificar(`⚙️ Automático: el trámite de ${e.nombres} ${e.apellidos} fue aprobado tras subir el COFIPRO`);
       cambiadas.push(e);
     }
   });
@@ -3105,22 +3153,24 @@ function vistaConfig(){
         Activar cambio automático de estado
       </label>
       <div class="form-grid">
-        <div><label>Después de (horas)</label><input id="cfgHoras" type="number" min="1" value="${config.autoHoras}"></div>
+        <div><label>Después de (horas)</label><input id="cfgHoras" type="number" min="0" value="${config.autoHoras}"></div>
+        <div><label>Y (minutos)</label><input id="cfgMinutos" type="number" min="0" max="59" value="${config.autoMinutos||0}"></div>
         <div><label>Cambiar a</label><select id="cfgDestino">
           <option value="aprobado" ${config.autoDestino==="aprobado"?"selected":""}>Trámite aprobado</option>
           <option value="finalizado" ${config.autoDestino==="finalizado"?"selected":""}>Trámite finalizado</option>
         </select></div>
       </div>
-      <p style="font-size:12px;color:var(--gris);margin:12px 0">Ejemplo: con 24 horas, todo trámite "En proceso" pasará automáticamente a "${ESTADOS[config.autoDestino].txt}" un día después de registrarse. Siempre puedes cambiar el estado manualmente.</p>
+      <p style="font-size:12px;color:var(--gris);margin:12px 0">Ejemplo: con 24 horas y 0 minutos, todo trámite "En proceso" pasará automáticamente a "${ESTADOS[config.autoDestino].txt}" un día después de registrarse. Siempre puedes cambiar el estado manualmente.</p>
       <button class="btn" onclick="guardarConfig()">💾 GUARDAR CONFIGURACIÓN</button>
     </div>`;
 }
 function guardarConfig(){
   config.autoActivo = $("cfgActivo").checked;
-  config.autoHoras = Math.max(1, parseInt($("cfgHoras").value) || 24);
+  config.autoHoras = Math.max(0, parseInt($("cfgHoras").value) || 0);
+  config.autoMinutos = Math.min(59, Math.max(0, parseInt($("cfgMinutos").value) || 0));
   config.autoDestino = $("cfgDestino").value;
   guarda("mtc_config", config);
-  log(`Configuró automatización: ${config.autoActivo ? "activa" : "inactiva"}, ${config.autoHoras}h → ${ESTADOS[config.autoDestino].txt}`);
+  log(`Configuró automatización: ${config.autoActivo ? "activa" : "inactiva"}, ${config.autoHoras}h ${config.autoMinutos}min → ${ESTADOS[config.autoDestino].txt}`);
   alert("Configuración guardada.");
   motorAutomatico();
 }
