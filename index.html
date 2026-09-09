@@ -204,6 +204,10 @@ tr:hover td{background:#FDF9F9}
 .pap-procesando{text-align:center; padding:30px 10px}
 .pap-comprobante{border:1px solid var(--borde); border-radius:12px; padding:14px; margin-top:12px; background:#fff}
 .pap-comprobante .pap-info-grid{margin-top:10px}
+.mini-crono{margin-top:5px}
+.mini-crono b{font-size:10.5px; color:var(--gris); font-weight:800; display:block; letter-spacing:.3px}
+.mini-barra{background:var(--fondo); border-radius:10px; height:5px; overflow:hidden; margin-top:3px; width:92px; box-shadow:inset 0 1px 2px rgba(0,0,0,.08)}
+.mini-relleno{height:100%; background:linear-gradient(90deg,#F77F00,#FFB066); border-radius:10px; transition:width 1s linear}
 .doc-item{display:flex; justify-content:space-between; align-items:center; background:var(--fondo); border-radius:8px; padding:8px 12px; margin:6px 0; font-size:13px}
 .hist-item{font-size:12px; padding:6px 0; border-bottom:1px solid var(--fondo); color:var(--gris)}
 .notif{background:#fff; border-left:4px solid var(--rojo); border-radius:10px; padding:12px 14px; margin-bottom:8px; box-shadow:var(--sombra); font-size:13px}
@@ -703,9 +707,37 @@ function filtrados(tipo){
     return true;
   });
 }
+// Cronómetro visible de "Trámite en proceso" → automáticamente "Trámite aprobado" (por defecto
+// 24 horas, configurable en Automatización). Solo se ve/corre mientras esa automatización esté
+// activa; motorAutomatico() es quien de verdad hace el cambio de estado cuando se cumple el plazo.
+function fraccionExp(e){
+  if (!e.registroMs) return 0;
+  const total = config.autoHoras * 3600000;
+  return Math.min(1, Math.max(0, (Date.now() - e.registroMs) / total));
+}
+function porcentajeVisualExp(e){
+  const p = fraccionExp(e);
+  return Math.round(100 * (1 - Math.pow(1 - p, 3)));
+}
+function tickCronoExp(){
+  const limite = config.autoHoras * 3600000;
+  document.querySelectorAll(".crono-exp").forEach(el => {
+    const e = expedientes.find(x => x.id === el.dataset.id);
+    if (!e || !e.registroMs){ el.textContent = "--:--:--"; return; }
+    const r = (e.registroMs + limite) - Date.now();
+    if (r <= 0){ el.textContent = "00:00:00"; return; }
+    const h = Math.floor(r/3600000), m = Math.floor(r%3600000/60000), sg = Math.floor(r%60000/1000);
+    el.textContent = [h,m,sg].map(n => String(n).padStart(2,"0")).join(":");
+  });
+  document.querySelectorAll(".mini-relleno[data-id]").forEach(rel => {
+    const e = expedientes.find(x => x.id === rel.dataset.id);
+    if (e) rel.style.width = porcentajeVisualExp(e) + "%";
+  });
+}
 function pintarTabla(){
   const tb = document.querySelector("#tablaExp tbody");
   if (!tb) return;
+  if (cronoTimerExp){ clearInterval(cronoTimerExp); cronoTimerExp = null; }
   const lista = filtrados(vistaActual);
   tb.innerHTML = lista.map(e => `
     <tr>
@@ -714,7 +746,14 @@ function pintarTabla(){
       <td>${TIPOS[e.tipo]}</td>
       <td>${escapa(e.fechaRegistro)}</td>
       <td>${escapa(e.responsable)}</td>
-      <td><span class="estado ${ESTADOS[e.estado].clase}">${ESTADOS[e.estado].txt}</span></td>
+      <td>
+        <span class="estado ${ESTADOS[e.estado].clase}">${ESTADOS[e.estado].txt}</span>
+        ${e.estado === "tramite" && config.autoActivo && e.registroMs ? `
+        <div class="mini-crono">
+          <b class="crono-exp" data-id="${e.id}">--:--:--</b>
+          <div class="mini-barra"><div class="mini-relleno" data-id="${e.id}" style="width:${porcentajeVisualExp(e)}%"></div></div>
+        </div>` : (e.aprobadoAutoTexto ? `<div class="mini-crono"><b style="color:var(--verde)">✓ ${escapa(e.aprobadoAutoTexto)}</b></div>` : "")}
+      </td>
       <td class="acciones">
         <button title="Ver / Editar" onclick="abrirExpediente('${e.id}')">✏️</button>
         <button title="Imprimir Constancia" onclick="imprimirConstancia('${e.id}')">📄</button>
@@ -723,6 +762,7 @@ function pintarTabla(){
         <button title="Eliminar" onclick="eliminarExp('${e.id}')">🗑️</button>
       </td>
     </tr>`).join("") || `<tr><td colspan="7" style="text-align:center;color:var(--gris);padding:24px">No hay trámites que coincidan.</td></tr>`;
+  if (config.autoActivo && lista.some(e => e.estado === "tramite")) cronoTimerExp = setInterval(tickCronoExp, 1000);
 }
 
 
@@ -2156,6 +2196,7 @@ let solicitudes = lee("mtc_solicitudes", []);
 let cfgPap = lee("mtc_cfgpap", { activo:false, horas:72, destino:"finalizada" });
 let subPap = "estados";
 let cronoTimer = null;
+let cronoTimerExp = null;
 
 const EST_PAP = {
   registrada: { txt:"Solicitud registrada correctamente.", etq:"REGISTRADA", color:"#F77F00", barra:15 },
@@ -3026,14 +3067,17 @@ function busquedaGlobal(){
 }
 
 // ---------- Automatización de estados ----------
-function motorAutomatico(){
+async function motorAutomatico(){
   if (!config.autoActivo) return;
   const limite = config.autoHoras * 3600000;
   const cambiadas = [];
   expedientes.forEach(e => {
     if (e.estado === "tramite" && e.registroMs && Date.now() - e.registroMs >= limite){
       e.estado = config.autoDestino;
-      e.historial.unshift({ fecha: ahora(), usuario:"Sistema (automático)", accion:"Cambio automático a " + ESTADOS[config.autoDestino].txt });
+      const fechaCambio = ahora();
+      e.aprobadoAutoMs = Date.now();
+      e.aprobadoAutoTexto = ESTADOS[config.autoDestino].txt + " automáticamente el " + fechaCambio;
+      e.historial.unshift({ fecha: fechaCambio, usuario:"Sistema (automático)", accion:"Cambio automático a " + ESTADOS[config.autoDestino].txt });
       notificar(`⚙️ Automático: el trámite de ${e.nombres} ${e.apellidos} pasó a ${ESTADOS[config.autoDestino].txt}`);
       cambiadas.push(e);
     }
@@ -3043,7 +3087,13 @@ function motorAutomatico(){
     cambiadas.forEach(guardarExpedienteNube);
     auditoria.unshift({ fecha: ahora(), usuario:"Sistema", accion:"Cambios automáticos de estado aplicados" });
     guarda("mtc_auditoria", auditoria);
-    if (sesion) irVista(vistaActual);
+    if (sesion){
+      // Muestra brevemente el mismo loader del sistema al pasar de "en proceso" a su estado
+      // final, en vez de refrescar la tabla de golpe sin aviso.
+      mostrarCargando("Actualizando trámites…");
+      await ocultarCargando();
+      irVista(vistaActual);
+    }
   }
 }
 function vistaConfig(){
