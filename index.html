@@ -1360,6 +1360,14 @@ function abrirExpediente(id, tipoDefecto){
           <label style="text-transform:uppercase; font-weight:800; font-size:11px; color:var(--rojo); letter-spacing:1px">Requisitos adicionales</label>
         </div>
         <div class="full">
+          <label>Trámites — PDF con todos los trámites (un solo archivo)</label>
+          ${e.tramitesPdf
+            ? `<div class="doc-item"><span>✅ ${escapa(e.tramitesPdf.nombre)}</span>
+                <span><button class="btn-sec" style="padding:5px 10px" onclick="verArchivoRequisito('${e.id}','tramitesPdf')">⬇️</button>
+                <button class="btn-sec" style="padding:5px 10px" onclick="quitarRequisito('${e.id}','tramitesPdf')">✕</button></span></div>`
+            : `<input type="file" accept="application/pdf,.pdf" id="mTramitesPdf" onchange="subirRequisito('${e.id}','tramitesPdf',this)">`}
+        </div>
+        <div class="full">
           <label>Exámenes (manejo, conocimientos y médico) — un solo archivo</label>
           ${e.examenes
             ? `<div class="doc-item"><span>✅ ${escapa(e.examenes.nombre)}</span>
@@ -1492,24 +1500,34 @@ function borrarDoc(id, i){
   guardarExpedienteNube(e);
   abrirExpediente(id);
 }
-// ---------- Requisitos adicionales (exámenes / COFIPRO) ----------
+// ---------- Requisitos adicionales (trámites en PDF / exámenes / COFIPRO) ----------
 // Solo aplica a Nueva licencia y Recategorización. Los 3 exámenes (manejo, conocimientos,
 // médico) se manejan como un solo archivo. El certificado de COFIPRO recién se pide una vez
-// que ya se subió ese archivo de exámenes.
+// que ya se subió ese archivo de exámenes. "tramitesPdf" es un PDF único con todos los
+// trámites del cliente ya resueltos, independiente de los exámenes/COFIPRO.
+const REQUISITO_ETIQUETAS = {
+  tramitesPdf: "el PDF de trámites",
+  examenes: "los exámenes (manejo, conocimientos y médico)",
+  cofipro: "el certificado de COFIPRO"
+};
 function subirRequisito(id, campo, inputEl){
   const f = inputEl.files[0];
   if (!f) return;
+  if (campo === "tramitesPdf" && f.type !== "application/pdf" && !/\.pdf$/i.test(f.name)){
+    alert("Ese archivo debe ser un PDF.");
+    inputEl.value = "";
+    return;
+  }
   if (f.size > 2*1024*1024) return alert("Máximo 2 MB por archivo (límite del almacenamiento local).");
-  mostrarCargando(campo === "examenes" ? "Guardando exámenes…" : "Guardando certificado COFIPRO…", f);
+  mostrarCargando("Guardando " + REQUISITO_ETIQUETAS[campo] + "…", f);
   const r = new FileReader();
   r.onload = async () => {
     const e = expedientes.find(x => x.id === id);
     e[campo] = { nombre: f.name, data: r.result };
-    const etiqueta = campo === "examenes" ? "los exámenes (manejo, conocimientos y médico)" : "el certificado de COFIPRO";
-    e.historial.unshift({ fecha: ahora(), usuario: sesion.nombre, accion: "Subió " + etiqueta + ": " + f.name });
+    e.historial.unshift({ fecha: ahora(), usuario: sesion.nombre, accion: "Subió " + REQUISITO_ETIQUETAS[campo] + ": " + f.name });
     guarda("mtc_expedientes", expedientes);
     guardarExpedienteNube(e);
-    log(`Subió ${campo === "examenes" ? "exámenes" : "COFIPRO"} a DNI ${e.dni}`);
+    log(`Subió ${campo} a DNI ${e.dni}`);
     await ocultarCargando();
     abrirExpediente(id);
   };
@@ -1522,14 +1540,14 @@ function verArchivoRequisito(id, campo){
 }
 function quitarRequisito(id, campo){
   const e = expedientes.find(x => x.id === id);
-  if (!confirm("¿Quitar " + (campo === "examenes" ? "el archivo de exámenes" : "el certificado de COFIPRO") + "?")) return;
+  if (!confirm("¿Quitar " + REQUISITO_ETIQUETAS[campo] + "?")) return;
   e[campo] = null;
   // Si se quita el archivo de exámenes, el COFIPRO deja de tener sentido como requisito ya
   // cumplido (recién se pide DESPUÉS de subir los exámenes), así que también se limpia.
   if (campo === "examenes") e.cofipro = null;
   guarda("mtc_expedientes", expedientes);
   guardarExpedienteNube(e);
-  log(`Quitó ${campo === "examenes" ? "exámenes" : "COFIPRO"} de DNI ${e.dni}`);
+  log(`Quitó ${campo} de DNI ${e.dni}`);
   abrirExpediente(id);
 }
 function subirFoto(id){
