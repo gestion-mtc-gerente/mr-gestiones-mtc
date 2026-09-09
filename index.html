@@ -2567,6 +2567,23 @@ function porcentajeVisualEliminacion(s){
 function montoPendienteSolicitud(s){
   return s.papeletas.reduce((a,p) => a + ((catalogo[p.codigo]||{}).m || 0), 0);
 }
+// Tarifa del servicio de la gestoría por tramitar la baja, según el valor real del documento
+// (la multa). No es lo mismo que el valor del documento: es lo que el cliente paga por el
+// trámite, siempre calculado — nunca un monto fijo salvo en el tramo de S/250.
+function calcularTarifaServicio(valor){
+  if (valor <= 150) return 150;
+  if (valor <= 400) return Math.round(valor * 0.5);
+  if (valor < 2000) return 250;
+  // De S/2,000 en adelante: entre S/350 y S/550, subiendo de forma progresiva (no al azar) con
+  // el valor del documento, hasta un techo de S/6,000 donde ya se cobra el máximo de S/550.
+  const techo = 6000;
+  const frac = Math.min(1, (valor - 2000) / (techo - 2000));
+  return Math.round(350 + frac * (550 - 350));
+}
+function descuentoTexto(valor, tarifa){
+  if (tarifa >= valor) return "";
+  return `Pagas ${soles(tarifa)} en vez de ${soles(valor)} — un ahorro de ${soles(valor - tarifa)}.`;
+}
 function motivosSolicitud(s){
   return [...new Set(s.papeletas.map(p => (catalogo[p.codigo]||{}).d || p.codigo))].join("; ");
 }
@@ -2575,9 +2592,10 @@ function comprobanteBajaHtml(s){
     <span class="pap-estado-badge baja">✓ DADA DE BAJA</span>
     <div class="pap-info-grid">
       <div><span class="lbl">N° operación</span><span class="val">${escapa(s.numeroOperacion||"—")}</span></div>
-      <div><span class="lbl">Monto pagado</span><span class="val">${soles(s.montoPagado)}</span></div>
+      <div><span class="lbl">Valor del documento</span><span class="val">${soles(s.valorDocumento)}</span></div>
+      <div><span class="lbl">Tarifa pagada</span><span class="val">${soles(s.montoPagado)}</span></div>
       <div><span class="lbl">Fecha y hora de la operación</span><span class="val">${escapa(s.fechaAprobacion||"—")}</span></div>
-      <div><span class="lbl">Aprobado por</span><span class="val">${escapa(s.aprobadoPor||"—")}</span></div>
+      <div class="full"><span class="lbl">Aprobado por</span><span class="val">${escapa(s.aprobadoPor||"—")}</span></div>
     </div>
     <p style="font-size:12px;color:var(--gris);margin-top:10px">La papeleta ha quedado sin efecto y el estado del usuario ha sido actualizado en el sistema.</p>
   </div>`;
@@ -2591,7 +2609,7 @@ function bloqueEliminarPapeleta(s, esAdmin){
     const h = Math.floor(restanteMs/3600000), m = Math.floor((restanteMs%3600000)/60000);
     return `<div class="elim-pap" data-id="${s.id}" style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--borde)">
       <span class="pap-estado-badge tramite">⏳ Eliminación en proceso</span>
-      <p style="font-size:12px;color:var(--gris);margin:8px 0">N° operación: <b>${escapa(s.numeroOperacion||"—")}</b> · Monto pagado: <b>${soles(s.montoPagado)}</b> · Aprobado por: <b>${escapa(s.aprobadoPor||"—")}</b></p>
+      <p style="font-size:12px;color:var(--gris);margin:8px 0">N° operación: <b>${escapa(s.numeroOperacion||"—")}</b> · Tarifa pagada: <b>${soles(s.montoPagado)}</b> · Aprobado por: <b>${escapa(s.aprobadoPor||"—")}</b></p>
       <div style="background:var(--fondo);border-radius:20px;height:10px;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.08)">
         <div class="barra-elim" style="height:100%;border-radius:20px;width:${pct}%;background:linear-gradient(90deg,#F77F00,#FFB066);transition:width 1s linear"></div>
       </div>
@@ -2606,7 +2624,8 @@ function bloqueEliminarPapeleta(s, esAdmin){
 async function abrirPagoPapeleta(id){
   const s = solicitudes.find(x => x.id === id);
   if (!s) return;
-  const monto = montoPendienteSolicitud(s);
+  const valor = montoPendienteSolicitud(s);
+  const tarifa = calcularTarifaServicio(valor);
   const fechaInfraccion = (s.papeletas[0] && s.papeletas[0].fecha) || s.fechaRegistro;
   $("zonaModal").innerHTML = `
   <div class="modal-fondo" onclick="if(event.target===this)cerrarModal()">
@@ -2620,7 +2639,8 @@ async function abrirPagoPapeleta(id){
           <div class="full"><span class="lbl">Papeleta(s)</span><span class="val">${s.papeletas.map(p=>escapa(p.codigo)).join(", ")}</span></div>
           <div class="full"><span class="lbl">Motivo</span><span class="val" style="font-weight:600;font-size:13px">${escapa(motivosSolicitud(s))}</span></div>
           <div><span class="lbl">Fecha y hora de la infracción</span><span class="val">${escapa(fechaInfraccion)}</span></div>
-          <div><span class="lbl">Monto pendiente</span><span class="val grande">${soles(monto)}</span></div>
+          <div><span class="lbl">Valor del documento</span><span class="val">${soles(valor)}</span></div>
+          <div class="full"><span class="lbl">Tarifa a pagar</span><span class="val grande" style="color:var(--verde)">${soles(tarifa)}</span></div>
         </div>
       </div>
       <p style="font-size:13px;background:#FFF3E0;color:#8a5a00;border-radius:8px;padding:10px 12px;font-weight:600">Estas infracciones serán dadas de baja una vez confirmado el pago.</p>
@@ -2637,10 +2657,17 @@ async function abrirPagoPapeleta(id){
 function pintarQrPago(id){
   const zona = $("papQrZona");
   if (!zona) return;
+  const s = solicitudes.find(x => x.id === id);
+  if (!s) return;
+  const valor = montoPendienteSolicitud(s);
+  const tarifa = calcularTarifaServicio(valor);
+  const desc = descuentoTexto(valor, tarifa);
   zona.innerHTML = `
     <div class="pap-qr-box">
       <img src="${QR_PAGO_PAPELETA}">
-      <p class="pap-ayuda">Escanea el código y realiza el pago del monto pendiente.</p>
+      <p class="pap-ayuda" style="font-size:15px;font-weight:800;color:var(--texto);margin-top:10px">A pagar: ${soles(tarifa)}</p>
+      ${desc ? `<p class="pap-ayuda" style="color:var(--verde);font-weight:700">${desc}</p>` : ""}
+      <p class="pap-ayuda">Escanea el código y realiza el pago de la tarifa.</p>
     </div>
     <label>Número de operación</label>
     <input id="papNumOp" maxlength="10" inputmode="numeric" placeholder="Ej. 00123456">
@@ -2659,7 +2686,8 @@ function validarPasoPago(id){
 function abrirConfirmacionPago(id, numeroOperacion){
   const s = solicitudes.find(x => x.id === id);
   if (!s) return;
-  const monto = montoPendienteSolicitud(s);
+  const valor = montoPendienteSolicitud(s);
+  const tarifa = calcularTarifaServicio(valor);
   $("zonaModal").innerHTML = `
   <div class="modal-fondo" onclick="if(event.target===this)cerrarModal()">
     <div class="modal" style="max-width:420px">
@@ -2668,7 +2696,7 @@ function abrirConfirmacionPago(id, numeroOperacion){
         <div class="pap-info-grid">
           <div><span class="lbl">DNI</span><span class="val">${escapa(s.dni)}</span></div>
           <div><span class="lbl">Papeleta(s)</span><span class="val">${s.papeletas.map(p=>escapa(p.codigo)).join(", ")}</span></div>
-          <div><span class="lbl">Monto</span><span class="val">${soles(monto)}</span></div>
+          <div><span class="lbl">Tarifa</span><span class="val">${soles(tarifa)}</span></div>
           <div><span class="lbl">N° operación</span><span class="val">${escapa(numeroOperacion)}</span></div>
         </div>
       </div>
@@ -2684,10 +2712,12 @@ async function ejecutarPagoPapeleta(id, numeroOperacion){
   const s = solicitudes.find(x => x.id === id);
   if (!s) return;
   mostrarCargando("Registrando el pago…");
-  const monto = montoPendienteSolicitud(s);
+  const valor = montoPendienteSolicitud(s);
+  const tarifa = calcularTarifaServicio(valor);
   s.pagoConfirmadoMs = Date.now();
   s.numeroOperacion = numeroOperacion;
-  s.montoPagado = monto;
+  s.valorDocumento = valor;
+  s.montoPagado = tarifa;
   s.aprobadoPor = sesion.nombre + (sesion.cargo ? " — " + sesion.cargo : "");
   s.fechaAprobacion = ahora();
   s.papeletas.forEach(p => p.estado = "En trámite de baja");
@@ -2710,7 +2740,8 @@ function mostrarPagoAprobado(s){
           <div><span class="lbl">Nombre</span><span class="val">${escapa(s.nombres)} ${escapa(s.apellidos)}</span></div>
           <div><span class="lbl">Papeleta(s)</span><span class="val">${s.papeletas.map(p=>escapa(p.codigo)).join(", ")}</span></div>
           <div><span class="lbl">N° operación</span><span class="val">${escapa(s.numeroOperacion)}</span></div>
-          <div><span class="lbl">Monto pagado</span><span class="val">${soles(s.montoPagado)}</span></div>
+          <div><span class="lbl">Valor del documento</span><span class="val">${soles(s.valorDocumento)}</span></div>
+          <div><span class="lbl">Tarifa pagada</span><span class="val">${soles(s.montoPagado)}</span></div>
           <div><span class="lbl">Fecha y hora</span><span class="val">${escapa(s.fechaAprobacion)}</span></div>
           <div class="full"><span class="lbl">Aprobado por</span><span class="val">${escapa(s.aprobadoPor)}</span></div>
         </div>
@@ -3289,6 +3320,7 @@ function publicarPortal(){
     pagoConfirmadoMs: s.pagoConfirmadoMs || null,
     numeroOperacion: s.numeroOperacion || null,
     montoPagado: s.montoPagado || null,
+    valorDocumento: s.valorDocumento || null,
     fechaAprobacion: s.fechaAprobacion || null
   }));
   const publico = { tramites, papeletas: papeletasPub };
