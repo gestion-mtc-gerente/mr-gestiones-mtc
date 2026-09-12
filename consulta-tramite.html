@@ -100,7 +100,7 @@ header .sub{font-size:12px; opacity:.85; margin-top:4px}
 
 <header>
   <div class="marca" id="marcaHeader"><span class="tag">MTC</span> MR GESTIONES</div>
-  <div class="sub">Gestión y asesoría de trámites — empresa privada, no somos una entidad del Estado</div>
+  <div class="sub" id="subHeader">Gestión y asesoría de trámites — empresa privada, no somos una entidad del Estado</div>
 </header>
 
 <div class="contenedor">
@@ -166,6 +166,15 @@ const escapa = t => String(t ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'
     if (logo){
       const val = JSON.parse(logo);
       if (val) $("marcaHeader").innerHTML = `<img src="${val}" style="height:34px;width:auto;object-fit:contain;background:#fff;border-radius:6px;padding:3px">`;
+    }
+  }catch(_e){ /* se deja el texto de respaldo */ }
+  // Igual que el logo: si desde el sistema interno se editó el texto del encabezado, se usa
+  // aquí también (mismo dominio, mismo localStorage). Si no, se deja el texto de respaldo.
+  try{
+    const subtitulo = localStorage.getItem("mtc_hm_subtitulo");
+    if (subtitulo){
+      const val = JSON.parse(subtitulo);
+      if (val) $("subHeader").textContent = val;
     }
   }catch(_e){ /* se deja el texto de respaldo */ }
 })();
@@ -373,6 +382,11 @@ async function buscar(){
           <div class="carga-barra"><div class="relleno"></div></div>
         </div>`
       : "";
+    const aptitudHtml = t.aptitud === "apto"
+      ? `<span class="estado" style="background:var(--verde)">✓ APTO</span>`
+      : t.aptitud === "no_apto"
+      ? `<span class="estado" style="background:var(--rojo)">✕ NO APTO</span>`
+      : "";
     const tramiteCard = `<div class="tramite-card">
       <div class="top">
         <div>
@@ -380,7 +394,10 @@ async function buscar(){
           <div class="meta">Código ${escapa(t.codigo)} · Registrado el ${escapa(t.fechaRegistro)}</div>
           <div class="meta">Última actualización: ${escapa(t.actualizado)}</div>
         </div>
-        <span class="estado ${e.clase}">${escapa(e.txt)}</span>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          <span class="estado ${e.clase}">${escapa(e.txt)}</span>
+          ${aptitudHtml}
+        </div>
       </div>
       ${cargaHtml}
       ${docsHtml}

@@ -89,6 +89,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--rojo)}
 #headerMTC .hm-marca{font-weight:900; letter-spacing:1px; font-size:14px; display:flex; align-items:center; gap:8px}
 #headerMTC .hm-marca .tag{background:#fff; color:var(--rojo-osc); font-size:10px; font-weight:900; padding:2px 8px; border-radius:5px; letter-spacing:1px}
 #headerMTC .hm-sub{font-size:11px; opacity:.85; flex:1; min-width:180px}
+#headerMTC .hm-sub-editar{background:none; border:none; color:#fff; opacity:.7; font-size:11px; cursor:pointer; padding:2px 4px; vertical-align:middle}
+#headerMTC .hm-sub-editar:hover{opacity:1}
 #headerMTC .hm-pdf{display:flex; gap:6px; align-items:center; flex-wrap:wrap}
 #headerMTC .hm-pdf input{width:150px; padding:7px 10px; font-size:12px; border-radius:8px 0 0 8px; border:none}
 #headerMTC .hm-pdf button{background:#fff; color:var(--rojo-osc); border:none; border-radius:0 8px 8px 0; padding:7px 12px; font-weight:800; font-size:12px}
@@ -266,7 +268,7 @@ h1.titulo-vista{font-size:22px; font-weight:900; margin-bottom:16px}
   <div id="headerMTC">
     <div class="hm-top">
       <div class="hm-marca" id="hmMarca"></div>
-      <div class="hm-sub">Gestión y asesoría de trámites — empresa privada, no somos una entidad del Estado</div>
+      <div class="hm-sub"><span id="hmSubTexto"></span> <button type="button" class="hm-sub-editar" onclick="abrirEditarSubtitulo()" title="Editar este texto">✏️</button></div>
       <div class="hm-pdf">
         <input id="hmDni" maxlength="8" inputmode="numeric" placeholder="DNI del cliente">
         <button onclick="generarPDFdesdeHeader()">📥 Generar PDF de constancia</button>
@@ -417,6 +419,8 @@ let notifs       = lee("mtc_notifs", []);
 let config       = lee("mtc_config", { autoActivo:false, autoHoras:24, autoMinutos:0, autoDestino:"aprobado" });
 function limiteAutoMs(){ return config.autoHoras * 3600000 + (config.autoMinutos||0) * 60000; }
 let logoEmpresa  = lee("mtc_logo", null);
+const SUBTITULO_HEADER_DEFECTO = "Gestión y asesoría de trámites — empresa privada, no somos una entidad del Estado";
+let hmSubtitulo  = lee("mtc_hm_subtitulo", SUBTITULO_HEADER_DEFECTO);
 let sesion       = null;
 let vistaActual  = "dashboard";
 let fotoEscaneada = null; // foto recortada automáticamente de la ficha RENIEC, pendiente de guardar
@@ -458,6 +462,7 @@ function pintarIconoOjo(btn, visible){
   pintarIconoOjo($("ojoLogUser"), false);
   pintarIconoOjo($("ojoLogPass"), false);
   pintarLogoHeaderTop();
+  pintarSubtituloHeader();
   setTimeout(() => { motorAutomatico(); motorPapeletas(); }, 0);
   setInterval(() => { motorAutomatico(); motorPapeletas(); }, 60000);
 })();
@@ -1399,6 +1404,11 @@ function abrirExpediente(id, tipoDefecto){
         </select></div>
         <div><label>Fecha de finalización</label><input id="mFin" type="date" value="${e ? (e.fechaFin || "") : ""}"></div>
         <div><label>Clase y categoría</label><input id="mCat" placeholder="Ej. A-I, A-IIa" value="${e ? escapa(e.categoria||"") : ""}"></div>
+        <div><label>Estado de aptitud (según categoría)</label><select id="mAptitud">
+          <option value="" ${!e || !e.aptitud ? "selected" : ""}>Pendiente de evaluación</option>
+          <option value="apto" ${e && e.aptitud==="apto" ? "selected" : ""}>APTO</option>
+          <option value="no_apto" ${e && e.aptitud==="no_apto" ? "selected" : ""}>NO APTO</option>
+        </select></div>
         <div><label>Sede / Oficina</label><input id="mSede" value="${e ? escapa(e.sede||"") : ""}"></div>
         <div class="full"><label>Observaciones</label><textarea id="mObs" rows="2">${e ? escapa(e.observaciones) : ""}</textarea></div>
         <div class="full" style="border-top:1px solid var(--borde); margin-top:4px; padding-top:12px">
@@ -1480,7 +1490,7 @@ async function guardarExpediente(id){
     direccion: $("mDir").value.trim(), nombres: nom, apellidos: ape,
     tipo: $("mTipo").value, responsable: $("mRes").value.trim(),
     estado: $("mEstado").value, fechaFin: $("mFin").value,
-    categoria: $("mCat").value.trim(), sede: $("mSede").value.trim(),
+    categoria: $("mCat").value.trim(), aptitud: $("mAptitud").value, sede: $("mSede").value.trim(),
     observaciones: $("mObs").value.trim(),
     tipoLicencia: $("mTipoLic").value, restricciones: $("mRestr").value.trim(),
     centroEmision: $("mCentro").value.trim(), numeroLicencia: $("mNumLic").value.trim(),
@@ -1489,10 +1499,14 @@ async function guardarExpediente(id){
   if (id){
     const e = expedientes.find(x => x.id === id);
     const cambioEstado = e.estado !== datos.estado;
+    const cambioAptitud = (e.aptitud||"") !== datos.aptitud;
+    const APTITUD_TXT = { apto:"APTO", no_apto:"NO APTO", "":"Pendiente de evaluación" };
     Object.assign(e, datos);
     e.historial.unshift({ fecha: ahora(), usuario: sesion.nombre, accion: cambioEstado ? "Cambió estado a " + ESTADOS[datos.estado].txt : "Editó el expediente" });
+    if (cambioAptitud) e.historial.unshift({ fecha: ahora(), usuario: sesion.nombre, accion: "Cambió estado de aptitud a " + APTITUD_TXT[datos.aptitud] });
     log(`Editó expediente DNI ${e.dni}` + (cambioEstado ? ` (estado → ${ESTADOS[datos.estado].txt})` : ""));
     if (cambioEstado) notificar(`El trámite de ${e.nombres} ${e.apellidos} pasó a: ${ESTADOS[datos.estado].txt}`);
+    if (cambioAptitud && datos.aptitud) notificar(`El trámite de ${e.nombres} ${e.apellidos} quedó: ${APTITUD_TXT[datos.aptitud]}`);
   } else {
     if (expedientes.some(x => x.dni === dni && x.tipo === datos.tipo))
       return alert("Ya existe un trámite de este tipo registrado con ese DNI.");
@@ -2065,6 +2079,38 @@ function pintarLogoHeaderTop(){
          <input type="file" accept="image/*" style="display:none" onchange="subirLogoEncabezado(this)">
        </label>`;
 }
+function pintarSubtituloHeader(){
+  const el = $("hmSubTexto");
+  if (el) el.textContent = hmSubtitulo;
+}
+function abrirEditarSubtitulo(){
+  $("zonaModal").innerHTML = `
+  <div class="modal-fondo" onclick="if(event.target===this)cerrarModal()">
+    <div class="modal" style="max-width:460px">
+      <h2>Editar texto del encabezado</h2>
+      <div class="form-grid">
+        <div class="full"><label>Texto</label><textarea id="mSubtitulo" rows="3">${escapa(hmSubtitulo)}</textarea></div>
+      </div>
+      <div class="modal-botones">
+        <button class="btn" onclick="guardarSubtituloHeader()">💾 GUARDAR</button>
+        <button class="btn-sec" onclick="restaurarSubtituloDefecto()">Restaurar texto original</button>
+        <button class="btn-sec" onclick="cerrarModal()">Cancelar</button>
+      </div>
+    </div>
+  </div>`;
+}
+function restaurarSubtituloDefecto(){
+  $("mSubtitulo").value = SUBTITULO_HEADER_DEFECTO;
+}
+function guardarSubtituloHeader(){
+  const texto = $("mSubtitulo").value.trim();
+  if (!texto) return alert("El texto no puede estar vacío.");
+  hmSubtitulo = texto;
+  guarda("mtc_hm_subtitulo", hmSubtitulo);
+  log("Actualizó el texto del encabezado");
+  pintarSubtituloHeader();
+  cerrarModal();
+}
 
 function editarPlantilla(tipo){
   const p = plantillas[tipo];
@@ -2350,6 +2396,11 @@ function buscarConsultaInterna(){
           <div class="carga-barra"><div class="relleno"></div></div>
         </div>`
       : "";
+    const aptitudHtml = t.aptitud === "apto"
+      ? `<span class="estado-pill" style="background:var(--verde)">✓ APTO</span>`
+      : t.aptitud === "no_apto"
+      ? `<span class="estado-pill" style="background:var(--rojo)">✕ NO APTO</span>`
+      : "";
     const tramiteCard = `<div class="tramite-card">
       <div class="top">
         <div>
@@ -2357,7 +2408,10 @@ function buscarConsultaInterna(){
           <div class="meta">Código ${escapa(codigo)} · Registrado el ${escapa(t.fechaRegistro)}</div>
           <div class="meta">Última actualización: ${escapa(actualizado)}</div>
         </div>
-        <span class="estado-pill ${claseColor}">${escapa(e.txt)}</span>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          <span class="estado-pill ${claseColor}">${escapa(e.txt)}</span>
+          ${aptitudHtml}
+        </div>
       </div>
       ${cargaHtml}
       ${docsHtml}
@@ -3301,7 +3355,7 @@ function publicarPortal(){
     fechaRegistro: e.fechaRegistro,
     actualizado: (e.historial && e.historial[0] ? e.historial[0].fecha : e.fechaRegistro),
     codigo: e.id.replace("E","EXP-"),
-    categoria: e.categoria || "", tipoLicencia: e.tipoLicencia || "",
+    categoria: e.categoria || "", aptitud: e.aptitud || "", tipoLicencia: e.tipoLicencia || "",
     restricciones: e.restricciones || "", centroEmision: e.centroEmision || "",
     numeroLicencia: e.numeroLicencia || "", fechaExpedicion: e.fechaExpedicion || "",
     vigenteHasta: e.vigenteHasta || "",
