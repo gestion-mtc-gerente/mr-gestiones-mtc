@@ -422,6 +422,9 @@ let config       = lee("mtc_config", { autoActivo:false, autoHoras:24, autoMinut
 const CATEGORIAS_LICENCIA = ["A-I","A-IIa","A-IIb","A-IIIa","A-IIIb","A-IIIc"];
 if (!config.categoriasActivas) config.categoriasActivas = {};
 CATEGORIAS_LICENCIA.forEach(c => { if (config.categoriasActivas[c] === undefined) config.categoriasActivas[c] = true; });
+// El resultado automático de evaluación viene activado por defecto (incluso en instalaciones
+// que ya tenían "mtc_config" guardado desde antes de que existiera esta opción).
+if (config.evalAutoActivo === undefined){ config.evalAutoActivo = true; guarda("mtc_config", config); }
 function limiteAutoMs(){ return config.autoHoras * 3600000 + (config.autoMinutos||0) * 60000; }
 let logoEmpresa  = lee("mtc_logo", null);
 const SUBTITULO_HEADER_DEFECTO = "Gestión y asesoría de trámites — empresa privada, no somos una entidad del Estado";
@@ -2310,18 +2313,22 @@ function intentarAutoRegistrarEvaluacion(){
 }
 function resultadoEvaluacionHtml(ev){
   const badge = ev.resultado === "apto"
-    ? `<span class="estado" style="background:var(--verde)">✓ APTO</span>`
-    : `<span class="estado" style="background:var(--rojo)">✕ NO APTO</span>`;
-  const categorias = (ev.categorias && ev.categorias.length) ? ev.categorias.join(", ") : "";
+    ? `<span class="estado" style="background:var(--verde);font-size:15px;padding:9px 18px">✓ APTO</span>`
+    : `<span class="estado" style="background:var(--rojo);font-size:15px;padding:9px 18px">✕ NO APTO</span>`;
+  const categorias = (ev.categorias && ev.categorias.length) ? ev.categorias.join(", ") : "—";
   return `<div class="card" style="margin-bottom:12px">
     <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start">
       <div>
-        <p style="font-weight:800;font-size:15px">${escapa(ev.nombres)} ${escapa(ev.apellidos)}</p>
-        <p style="font-size:12px;color:var(--gris)">DNI ${escapa(ev.dni)}${categorias ? " · Categoría(s) " + escapa(categorias) : ""}${ev.direccion ? " · " + escapa(ev.direccion) : ""}</p>
-        <p style="font-size:11px;color:var(--gris);margin-top:4px">Evaluado el ${escapa(ev.fecha)} · ${escapa(ev.responsable)}</p>
+        <p style="font-weight:800;font-size:17px">${escapa(ev.nombres)} ${escapa(ev.apellidos)}</p>
+        <p style="font-size:13px;color:var(--gris)">DNI ${escapa(ev.dni)}${ev.direccion ? " · " + escapa(ev.direccion) : ""}</p>
       </div>
       ${badge}
     </div>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--borde)">
+      <span style="font-size:11px;font-weight:800;color:var(--gris);text-transform:uppercase;letter-spacing:.5px">Categorías</span>
+      <p style="font-size:20px;font-weight:800;color:var(--texto);margin-top:2px">${escapa(categorias)}</p>
+    </div>
+    <p style="font-size:11px;color:var(--gris);margin-top:8px">Evaluado el ${escapa(ev.fecha)} · ${escapa(ev.responsable)}</p>
   </div>`;
 }
 async function registrarEvaluacion(auto){
