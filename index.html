@@ -419,7 +419,7 @@ let auditoria    = lee("mtc_auditoria", []);
 let notifs       = lee("mtc_notifs", []);
 let config       = lee("mtc_config", { autoActivo:false, autoHoras:24, autoMinutos:0, autoDestino:"aprobado", evalAutoActivo:false, evalAutoResultado:"apto" });
 // Categorías oficiales de licencia de conducir (Reglamento Nacional de Licencias de Conducir).
-const CATEGORIAS_LICENCIA = ["A-I","A-IIa","A-IIb","A-IIIa","A-IIIb","A-IIIc"];
+const CATEGORIAS_LICENCIA = ["A-I","A-IIa","A-IIb","A-IIIa","A-IIIb","A-IIIc","B-IIb","B-IIc"];
 if (!config.categoriasActivas) config.categoriasActivas = {};
 CATEGORIAS_LICENCIA.forEach(c => { if (config.categoriasActivas[c] === undefined) config.categoriasActivas[c] = true; });
 // El resultado automático de evaluación viene activado por defecto (incluso en instalaciones
