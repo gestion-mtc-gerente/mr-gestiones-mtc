@@ -417,7 +417,11 @@ let usuarios     = lee("mtc_usuarios", []);
 let expedientes  = lee("mtc_expedientes", []);
 let auditoria    = lee("mtc_auditoria", []);
 let notifs       = lee("mtc_notifs", []);
-let config       = lee("mtc_config", { autoActivo:false, autoHoras:24, autoMinutos:0, autoDestino:"aprobado" });
+let config       = lee("mtc_config", { autoActivo:false, autoHoras:24, autoMinutos:0, autoDestino:"aprobado", evalAutoActivo:false, evalAutoResultado:"apto" });
+// Categorías oficiales de licencia de conducir (Reglamento Nacional de Licencias de Conducir).
+const CATEGORIAS_LICENCIA = ["A-I","A-IIa","A-IIb","A-IIIa","A-IIIb","A-IIIc"];
+if (!config.categoriasActivas) config.categoriasActivas = {};
+CATEGORIAS_LICENCIA.forEach(c => { if (config.categoriasActivas[c] === undefined) config.categoriasActivas[c] = true; });
 function limiteAutoMs(){ return config.autoHoras * 3600000 + (config.autoMinutos||0) * 60000; }
 let logoEmpresa  = lee("mtc_logo", null);
 const SUBTITULO_HEADER_DEFECTO = "Gestión y asesoría de trámites — empresa privada, no somos una entidad del Estado";
@@ -2258,28 +2262,32 @@ function limpiarCentrosCE(){
 // real — el sistema solo agiliza el llenado de los datos del cliente leyendo la Ficha RENIEC.
 let evaluaciones = lee("mtc_evaluaciones", []);
 function vistaEvaluacion(){
+  evAutoRegistrado = false;
+  const auto = config.evalAutoActivo;
   return `
     <h1 class="titulo-vista">Evaluación</h1>
     <div class="card" style="max-width:640px;margin-bottom:16px">
       <h3 style="font-size:15px;margin-bottom:10px">Nueva evaluación</h3>
       <div class="caja-scan">
         <label>📷 ESCANEAR FICHA RENIEC (opcional)</label>
-        <p>Sube la ficha RENIEC de la consulta en línea y el sistema completa los datos automáticamente. Siempre verifícalos antes de guardar.</p>
-        <input type="file" accept="image/*" id="evScanFicha" onchange="escanearDocumento(this, {dni:'evDni',nombres:'evNom',apellidos:'evApe',direccion:'evDir'}, 'evScanMsg')">
+        <p>Sube la ficha RENIEC de la consulta en línea y el sistema completa los datos automáticamente.${auto ? "" : " Siempre verifícalos antes de guardar."}</p>
+        <input type="file" accept="image/*" id="evScanFicha" onchange="escanearDocumento(this, {dni:'evDni',nombres:'evNom',apellidos:'evApe',direccion:'evDir'}, 'evScanMsg').then(intentarAutoRegistrarEvaluacion)">
         <div class="msg-scan" id="evScanMsg"></div>
       </div>
       <div class="form-grid">
-        <div><label>DNI *</label><input id="evDni" maxlength="8" inputmode="numeric"></div>
-        <div><label>Nombres *</label><input id="evNom"></div>
-        <div><label>Apellidos *</label><input id="evApe"></div>
+        <div><label>DNI *</label><input id="evDni" maxlength="8" inputmode="numeric" oninput="intentarAutoRegistrarEvaluacion()"></div>
+        <div><label>Nombres *</label><input id="evNom" oninput="intentarAutoRegistrarEvaluacion()"></div>
+        <div><label>Apellidos *</label><input id="evApe" oninput="intentarAutoRegistrarEvaluacion()"></div>
         <div><label>Dirección</label><input id="evDir"></div>
-        <div><label>Clase y categoría</label><input id="evCat" placeholder="Ej. A-I, A-IIa"></div>
-        <div><label>Resultado de la evaluación</label><select id="evResultado">
+        ${auto ? "" : `<div><label>Resultado de la evaluación</label><select id="evResultado">
           <option value="apto">APTO</option>
           <option value="no_apto">NO APTO</option>
-        </select></div>
+        </select></div>`}
       </div>
-      <button class="btn" style="width:100%;margin-top:14px" onclick="registrarEvaluacion()">GUARDAR RESULTADO</button>
+      <p style="font-size:12px;color:var(--gris);margin-top:6px">Categoría(s) que se registrarán: <b>${CATEGORIAS_LICENCIA.filter(c => config.categoriasActivas[c]).join(", ") || "ninguna activa"}</b> · configúralas en ⚙️ Automatización.</p>
+      ${auto
+        ? `<p style="font-size:12.5px;color:var(--gris);margin-top:10px">⚡ Resultado automático activado: se registra solo como <b>${config.evalAutoResultado==="apto"?"APTO":"NO APTO"}</b> apenas completes DNI, nombres y apellidos. Puedes cambiarlo en ⚙️ Automatización.</p>`
+        : `<button class="btn" style="width:100%;margin-top:14px" onclick="registrarEvaluacion()">GUARDAR RESULTADO</button>`}
       <p class="msg" id="evMsg" style="text-align:center;margin-top:10px;font-weight:700"></p>
       <div id="evResultadoZona"></div>
     </div>
@@ -2287,40 +2295,57 @@ function vistaEvaluacion(){
     <input id="evBuscar" placeholder="Buscar por DNI, nombre o apellido…" oninput="pintarEvaluaciones()" style="max-width:340px;margin-bottom:12px">
     <div id="listaEvaluaciones"></div>`;
 }
+let evAutoRegistrado = false;
+function categoriasActivasLista(){
+  return CATEGORIAS_LICENCIA.filter(c => config.categoriasActivas[c]);
+}
+function intentarAutoRegistrarEvaluacion(){
+  if (!config.evalAutoActivo) return;
+  const dni = $("evDni").value.trim(), nom = $("evNom").value.trim(), ape = $("evApe").value.trim();
+  const completo = /^\d{8}$/.test(dni) && nom && ape;
+  if (!completo){ evAutoRegistrado = false; return; }
+  if (evAutoRegistrado) return;
+  evAutoRegistrado = true;
+  registrarEvaluacion(true);
+}
 function resultadoEvaluacionHtml(ev){
   const badge = ev.resultado === "apto"
     ? `<span class="estado" style="background:var(--verde)">✓ APTO</span>`
     : `<span class="estado" style="background:var(--rojo)">✕ NO APTO</span>`;
+  const categorias = (ev.categorias && ev.categorias.length) ? ev.categorias.join(", ") : "";
   return `<div class="card" style="margin-bottom:12px">
     <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start">
       <div>
         <p style="font-weight:800;font-size:15px">${escapa(ev.nombres)} ${escapa(ev.apellidos)}</p>
-        <p style="font-size:12px;color:var(--gris)">DNI ${escapa(ev.dni)}${ev.categoria ? " · Categoría " + escapa(ev.categoria) : ""}${ev.direccion ? " · " + escapa(ev.direccion) : ""}</p>
+        <p style="font-size:12px;color:var(--gris)">DNI ${escapa(ev.dni)}${categorias ? " · Categoría(s) " + escapa(categorias) : ""}${ev.direccion ? " · " + escapa(ev.direccion) : ""}</p>
         <p style="font-size:11px;color:var(--gris);margin-top:4px">Evaluado el ${escapa(ev.fecha)} · ${escapa(ev.responsable)}</p>
       </div>
       ${badge}
     </div>
   </div>`;
 }
-async function registrarEvaluacion(){
+async function registrarEvaluacion(auto){
   const dni = $("evDni").value.trim(), nom = $("evNom").value.trim(), ape = $("evApe").value.trim();
+  const categorias = categoriasActivasLista();
   const msg = $("evMsg");
-  if (!/^\d{8}$/.test(dni)){ msg.style.color="var(--rojo)"; msg.textContent="El DNI debe tener 8 dígitos."; return; }
-  if (!nom || !ape){ msg.style.color="var(--rojo)"; msg.textContent="Nombres y apellidos son obligatorios."; return; }
-  mostrarCargando("Guardando resultado…");
+  if (!/^\d{8}$/.test(dni)){ if (!auto){ msg.style.color="var(--rojo)"; msg.textContent="El DNI debe tener 8 dígitos."; } return; }
+  if (!nom || !ape){ if (!auto){ msg.style.color="var(--rojo)"; msg.textContent="Nombres y apellidos son obligatorios."; } return; }
+  if (!auto) mostrarCargando("Guardando resultado…");
+  const resultado = auto ? config.evalAutoResultado : $("evResultado").value;
   const ev = {
     id: "EV" + Date.now(), dni, nombres: nom, apellidos: ape,
-    direccion: $("evDir").value.trim(), categoria: $("evCat").value.trim(),
-    resultado: $("evResultado").value,
+    direccion: $("evDir").value.trim(), categorias,
+    resultado, automatico: !!auto,
     fecha: ahora(), responsable: sesion.nombre
   };
   evaluaciones.unshift(ev);
   guarda("mtc_evaluaciones", evaluaciones);
-  log(`Registró evaluación · DNI ${dni} (${ev.resultado === "apto" ? "APTO" : "NO APTO"})`);
-  await ocultarCargando();
-  msg.style.color = "var(--verde)"; msg.textContent = "Resultado guardado ✓";
+  log(`Registró evaluación${auto ? " (automática)" : ""} · DNI ${dni} (${ev.resultado === "apto" ? "APTO" : "NO APTO"}) · Categorías: ${categorias.join(", ")}`);
+  if (!auto) await ocultarCargando();
+  msg.style.color = "var(--verde)"; msg.textContent = auto ? "Registrado automáticamente ✓" : "Resultado guardado ✓";
   $("evResultadoZona").innerHTML = resultadoEvaluacionHtml(ev);
-  ["evDni","evNom","evApe","evDir","evCat"].forEach(i => $(i).value = "");
+  ["evDni","evNom","evApe","evDir"].forEach(i => $(i).value = "");
+  evAutoRegistrado = false;
   pintarEvaluaciones();
 }
 function pintarEvaluaciones(){
@@ -3327,6 +3352,31 @@ function vistaConfig(){
       </div>
       <p style="font-size:12px;color:var(--gris);margin:12px 0">Ejemplo: con 24 horas y 0 minutos, todo trámite "En proceso" pasará automáticamente a "${ESTADOS[config.autoDestino].txt}" un día después de registrarse. Siempre puedes cambiar el estado manualmente.</p>
       <button class="btn" onclick="guardarConfig()">💾 GUARDAR CONFIGURACIÓN</button>
+    </div>
+    <div class="card" style="max-width:520px;margin-top:16px">
+      <label style="display:flex;gap:10px;align-items:center;font-weight:700;margin-bottom:16px">
+        <input type="checkbox" id="cfgEvalActivo" style="width:auto" ${config.evalAutoActivo ? "checked" : ""}>
+        Activar resultado automático de evaluación
+      </label>
+      <div class="form-grid">
+        <div><label>Resultado automático</label><select id="cfgEvalResultado">
+          <option value="apto" ${(config.evalAutoResultado||"apto")==="apto"?"selected":""}>APTO</option>
+          <option value="no_apto" ${config.evalAutoResultado==="no_apto"?"selected":""}>NO APTO</option>
+        </select></div>
+      </div>
+      <p style="font-size:12px;color:var(--gris);margin:12px 0">Con esto activo, el módulo de Evaluación ya no pide hacer clic en "Guardar": apenas completes el DNI, nombres, apellidos y al menos una categoría (a mano o escaneando la Ficha RENIEC), se registra solo con el resultado que elijas aquí. Siempre puedes corregir un registro después si hace falta.</p>
+      <button class="btn" onclick="guardarConfigEvaluacion()">💾 GUARDAR CONFIGURACIÓN</button>
+    </div>
+    <div class="card" style="max-width:520px;margin-top:16px">
+      <label style="font-size:11px;font-weight:800;color:var(--gris);letter-spacing:1px">CATEGORÍAS DE LICENCIA</label>
+      <p style="font-size:12.5px;color:var(--gris);margin:4px 0 12px">Elige qué categorías aparecen como opciones al momento de precalificar a un cliente en el módulo de Evaluación (puede calificar para varias a la vez).</p>
+      <div style="display:flex;flex-wrap:wrap;gap:10px 18px;margin-bottom:14px">
+        ${CATEGORIAS_LICENCIA.map(c => `<label style="display:flex;gap:6px;align-items:center;font-weight:600;font-size:13px">
+          <input type="checkbox" class="cfgCategoria" value="${c}" style="width:auto" ${config.categoriasActivas[c] ? "checked" : ""}>
+          ${c}
+        </label>`).join("")}
+      </div>
+      <button class="btn" onclick="guardarConfigCategorias()">💾 GUARDAR CONFIGURACIÓN</button>
     </div>`;
 }
 function guardarConfig(){
@@ -3338,6 +3388,20 @@ function guardarConfig(){
   log(`Configuró automatización: ${config.autoActivo ? "activa" : "inactiva"}, ${config.autoHoras}h ${config.autoMinutos}min → ${ESTADOS[config.autoDestino].txt}`);
   alert("Configuración guardada.");
   motorAutomatico();
+}
+function guardarConfigEvaluacion(){
+  config.evalAutoActivo = $("cfgEvalActivo").checked;
+  config.evalAutoResultado = $("cfgEvalResultado").value;
+  guarda("mtc_config", config);
+  log(`Configuró evaluación automática: ${config.evalAutoActivo ? "activa" : "inactiva"}, resultado por defecto → ${config.evalAutoResultado === "apto" ? "APTO" : "NO APTO"}`);
+  alert("Configuración guardada.");
+}
+function guardarConfigCategorias(){
+  document.querySelectorAll(".cfgCategoria").forEach(c => { config.categoriasActivas[c.value] = c.checked; });
+  guarda("mtc_config", config);
+  const activas = CATEGORIAS_LICENCIA.filter(c => config.categoriasActivas[c]);
+  log(`Configuró categorías de licencia disponibles: ${activas.join(", ") || "ninguna"}`);
+  alert("Configuración guardada.");
 }
 
 // ---------- Notificaciones ----------
