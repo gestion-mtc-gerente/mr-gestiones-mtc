@@ -2409,14 +2409,22 @@ function vistaConsulta(){
     <div class="tabs-consulta oculto" id="cpTabs">
       <button class="tab-consulta activo" data-tab="tramite" onclick="cambiarTabConsulta('tramite')">🪪 Trámite de licencia</button>
       <button class="tab-consulta" data-tab="papeletas" onclick="cambiarTabConsulta('papeletas')">🚦 Papeletas</button>
+      <button class="tab-consulta" data-tab="evaluacion" onclick="cambiarTabConsulta('evaluacion')">👤 Evaluación</button>
     </div>
     <div id="cpPanelTramite"></div>
-    <div id="cpPanelPapeletas" class="oculto"></div>`;
+    <div id="cpPanelPapeletas" class="oculto"></div>
+    <div id="cpPanelEvaluacion" class="oculto"></div>`;
 }
 function cambiarTabConsulta(tab){
   document.querySelectorAll("#cpTabs .tab-consulta").forEach(b => b.classList.toggle("activo", b.dataset.tab === tab));
   $("cpPanelTramite").classList.toggle("oculto", tab !== "tramite");
   $("cpPanelPapeletas").classList.toggle("oculto", tab !== "papeletas");
+  $("cpPanelEvaluacion").classList.toggle("oculto", tab !== "evaluacion");
+}
+function renderEvaluacionConsulta(dni){
+  const propias = evaluaciones.filter(ev => ev.dni === dni);
+  if (!propias.length) return `<div class="card"><p style="color:var(--gris)">No se encontraron evaluaciones registradas con ese DNI.</p></div>`;
+  return propias.map(resultadoEvaluacionHtml).join("");
 }
 const iconoDocConsulta = nombre => /\.pdf$/i.test(nombre) ? "📄" : "🖼️";
 // Papeletas: usa las solicitudes que la propia gestoría ya está tramitando (no el portal
@@ -2459,19 +2467,23 @@ function buscarConsultaInterna(){
   const msg = $("cpMsg");
   const panelTramite = $("cpPanelTramite");
   const panelPapeletas = $("cpPanelPapeletas");
+  const panelEvaluacion = $("cpPanelEvaluacion");
   const tabs = $("cpTabs");
   panelTramite.innerHTML = "";
   panelPapeletas.innerHTML = "";
+  panelEvaluacion.innerHTML = "";
   tabs.classList.add("oculto");
   msg.style.color = "var(--rojo)";
   if (!/^\d{8}$/.test(dni)){ msg.textContent = "Ingresa un DNI válido de 8 dígitos."; return; }
   const coincidencias = expedientes.filter(x => x.dni === dni);
   const solicitudesPropias = solicitudes.filter(x => x.dni === dni);
-  if (!coincidencias.length && !solicitudesPropias.length){ msg.textContent = "No se encontró ningún trámite ni solicitud registrado con ese DNI."; return; }
+  const evaluacionesPropias = evaluaciones.filter(x => x.dni === dni);
+  if (!coincidencias.length && !solicitudesPropias.length && !evaluacionesPropias.length){ msg.textContent = "No se encontró ningún trámite, solicitud ni evaluación registrado con ese DNI."; return; }
   msg.textContent = "";
   tabs.classList.remove("oculto");
-  cambiarTabConsulta(coincidencias.length ? "tramite" : "papeletas");
+  cambiarTabConsulta(coincidencias.length ? "tramite" : (solicitudesPropias.length ? "papeletas" : "evaluacion"));
   panelPapeletas.innerHTML = renderPapeletasConsulta(dni);
+  panelEvaluacion.innerHTML = renderEvaluacionConsulta(dni);
   if (!coincidencias.length){
     panelTramite.innerHTML = `<div class="card"><p style="color:var(--gris)">Este DNI no tiene trámites de licencia registrados.</p></div>`;
     return;
@@ -3533,7 +3545,14 @@ function publicarPortal(){
     valorDocumento: s.valorDocumento || null,
     fechaAprobacion: s.fechaAprobacion || null
   }));
-  const publico = { tramites, papeletas: papeletasPub };
+  // Evaluaciones (APTO / NO APTO), más recientes primero, para que el cliente vea el resultado
+  // de la misma forma en que quedó registrado en el sistema principal.
+  const evaluacionesPub = evaluaciones.map(ev => ({
+    dni: ev.dni, nombres: ev.nombres, apellidos: ev.apellidos,
+    resultado: ev.resultado, categorias: ev.categorias || [],
+    fecha: ev.fecha
+  }));
+  const publico = { tramites, papeletas: papeletasPub, evaluaciones: evaluacionesPub };
   const pesoMB = (JSON.stringify(publico).length / (1024*1024)).toFixed(1);
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([JSON.stringify(publico)], {type:"application/json"}));

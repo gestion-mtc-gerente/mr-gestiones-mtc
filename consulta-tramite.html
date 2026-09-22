@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Consulta de Trámite</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root{
   --rojo:#D62828; --rojo-osc:#A31F1F; --rojo-suave:#FDECEC;
@@ -94,6 +96,39 @@ header .sub{font-size:12px; opacity:.85; margin-top:4px}
 .tabs-consulta{display:flex; gap:8px; margin-top:22px; margin-bottom:14px; flex-wrap:wrap}
 .tab-consulta{background:#fff; color:var(--texto); border:1px solid var(--borde); border-radius:10px; padding:10px 16px; font-weight:700; font-size:13px}
 .tab-consulta.activo{background:var(--rojo); color:#fff; border-color:var(--rojo)}
+
+/* ===== Constancia descargable (mismo diseño que usa la oficina internamente) ===== */
+.btn-constancia{background:var(--rojo); color:#fff; border:none; border-radius:10px; padding:11px 16px; font-weight:700; font-size:13px; display:inline-flex; align-items:center; gap:6px; margin-top:10px}
+.btn-constancia:hover{background:var(--rojo-osc)}
+.btn-constancia:disabled{opacity:.6}
+.hoja{max-width:720px; margin:0 auto; border:1px solid #e0e0e0; border-radius:12px; overflow:hidden; background:#fff}
+.hoja .cab{background:#D62828; color:#fff; padding:22px 28px}
+.hoja .cab table{width:100%; border-collapse:collapse}
+.hoja .marca-doc{font-size:26px; font-weight:900; letter-spacing:2px}
+.hoja .rubro{font-size:12px; opacity:.9; letter-spacing:1px}
+.hoja .cod{text-align:right; font-size:11px; opacity:.9}
+.hoja .cod b{font-size:15px; letter-spacing:1px}
+.hoja .titulo{text-align:center; padding:20px; border-bottom:2px solid #FDECEC}
+.hoja .titulo h2{font-size:20px; letter-spacing:3px; margin:0}
+.hoja .titulo p{font-size:12px; color:#8B7F7F; margin:4px 0 0; letter-spacing:1px}
+.hoja .cuerpo{padding:24px 28px 4px; display:flex; gap:24px; flex-wrap:wrap}
+.hoja .datos{flex:1; min-width:260px}
+.hoja .grid-campos{display:grid; grid-template-columns:1fr 1fr; gap:12px 20px}
+.hoja .campo{border-bottom:1px solid #f2eded; padding-bottom:7px}
+.hoja .campo .et{display:block; font-size:10px; font-weight:700; color:#8B7F7F; text-transform:uppercase; letter-spacing:.5px}
+.hoja .campo .val{display:block; font-size:13.5px; font-weight:600; color:#292222; margin-top:3px}
+.hoja .seccion-licencia{padding:6px 28px 4px}
+.hoja .seccion-licencia .subt{font-size:12px; font-weight:800; color:#D62828; text-transform:uppercase; letter-spacing:.5px; margin:0 0 12px; padding-top:14px; border-top:1px solid #FDECEC}
+.hoja .foto img{width:110px; height:138px; object-fit:cover; border-radius:8px; border:1px solid #ccc}
+.hoja .sello{text-align:center; margin:8px 0 22px}
+.hoja .sello span{display:inline-block; border:3px solid #999; color:#999; font-weight:900; font-size:19px; letter-spacing:3px; padding:10px 26px; border-radius:10px; transform:rotate(-4deg)}
+.hoja .obs{padding:0 28px 10px; font-size:12px}
+.hoja .firmas{display:flex; justify-content:space-around; padding:34px 28px 22px; flex-wrap:wrap; gap:16px}
+.hoja .firma{text-align:center; width:220px}
+.hoja .linea{border-top:1px solid #333; margin-bottom:6px}
+.hoja .firma small{color:#8B7F7F; font-size:11px}
+.hoja .pie{background:#faf8f8; padding:12px 28px; font-size:10px; color:#8B7F7F; text-align:center; border-top:1px solid #eee}
+.oculto-offscreen{position:fixed; left:-9999px; top:0; width:720px; background:#fff}
 </style>
 </head>
 <body>
@@ -115,9 +150,11 @@ header .sub{font-size:12px; opacity:.85; margin-top:4px}
     <div class="tabs-consulta oculto" id="tabsConsulta">
       <button class="tab-consulta activo" data-tab="tramite" onclick="cambiarTab('tramite')">🪪 Trámite de licencia</button>
       <button class="tab-consulta" data-tab="papeletas" onclick="cambiarTab('papeletas')">🚦 Papeletas</button>
+      <button class="tab-consulta" data-tab="evaluacion" onclick="cambiarTab('evaluacion')">👤 Evaluación</button>
     </div>
     <div id="resultados"></div>
     <div id="resultadosPapeletas" class="oculto"></div>
+    <div id="resultadosEvaluacion" class="oculto"></div>
 
     <div class="oficial-box">
       <p>¿Quieres verificar tu licencia directamente en el registro oficial del Estado Peruano?</p>
@@ -145,6 +182,99 @@ const ESTADOS = {
   observado:  { txt:"Trámite observado",  clase:"e-observado" },
   finalizado: { txt:"Trámite finalizado", clase:"e-finalizado" }
 };
+const EMPRESA = { nombre:"MR GESTIONES", rubro:"Gestión y asesoría de trámites", direccion:"Lima — Perú" };
+
+// ---------- Constancia en PDF (mismo diseño que la oficina genera internamente) ----------
+function generarConstanciaHtml(t){
+  const colores = { tramite:"#F77F00", aprobado:"#1B9E4B", observado:"#D62828", finalizado:"#2264D1" };
+  const hoy = new Date();
+  const foto = t.foto
+    ? `<img src="${t.foto}">`
+    : `<div style="width:110px;height:138px;border:1px dashed #bbb;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:38px">&#128100;</div>`;
+  const logoHeader = window.__logoGuardado
+    ? `<img src="${window.__logoGuardado}" style="height:44px;width:auto;object-fit:contain;background:#fff;border-radius:6px;padding:4px">`
+    : `<div class="marca-doc">${escapa(EMPRESA.nombre)}</div>`;
+  const subtitulos = {
+    nueva:"GESTIÓN DE NUEVA LICENCIA", revalidacion:"GESTIÓN DE REVALIDACIÓN",
+    recategorizacion:"GESTIÓN DE RECATEGORIZACIÓN", retenciones:"GESTIÓN DE RETENCIÓN"
+  };
+  const codigoVerificacion = "VF-" + t.dni + "-" + String(t.codigo).slice(-4);
+  return `<div class="hoja" id="hojaConstancia_${escapa(t.codigo)}">
+    <div class="cab"><table><tr>
+      <td style="width:1%;white-space:nowrap;vertical-align:middle">${logoHeader}</td>
+      <td style="vertical-align:middle;padding-left:12px"><div class="rubro">${escapa(EMPRESA.rubro)}</div></td>
+      <td class="cod" style="vertical-align:middle;white-space:nowrap">N° DE EXPEDIENTE<br><b>${escapa(t.codigo)}</b></td>
+    </tr></table></div>
+    <div class="titulo"><h2>CONSTANCIA DE TRÁMITE</h2><p>${subtitulos[t.tipo] || ""}</p></div>
+    <div class="cuerpo">
+      <div class="datos"><div class="grid-campos">
+        <div class="campo"><span class="et">Cliente</span><span class="val"><b>${escapa(t.nombres)} ${escapa(t.apellidos)}</b></span></div>
+        <div class="campo"><span class="et">DNI</span><span class="val">${escapa(t.dni)}</span></div>
+        <div class="campo"><span class="et">Teléfono</span><span class="val">${escapa(t.telefono) || "—"}</span></div>
+        <div class="campo"><span class="et">Dirección</span><span class="val">${escapa(t.direccion) || "—"}</span></div>
+        <div class="campo"><span class="et">Tipo de trámite</span><span class="val">${escapa(TIPOS[t.tipo] || t.tipo)}</span></div>
+        <div class="campo"><span class="et">Sede</span><span class="val">${escapa(t.sede) || escapa(EMPRESA.direccion)}</span></div>
+        <div class="campo"><span class="et">Fecha de ingreso</span><span class="val">${escapa(t.fechaRegistro)}</span></div>
+        <div class="campo"><span class="et">Fecha de finalización</span><span class="val">${escapa(t.fechaFin) || "—"}</span></div>
+        <div class="campo"><span class="et">Responsable</span><span class="val">${escapa(t.responsable) || "—"}</span></div>
+        <div class="campo"><span class="et">Cód. verificación</span><span class="val">${escapa(codigoVerificacion)}</span></div>
+      </div></div>
+      <div class="foto" style="text-align:center">${foto}<div style="font-size:10px;color:#8B7F7F;margin-top:6px">FOTO DEL CLIENTE</div></div>
+    </div>
+    <div class="seccion-licencia">
+      <h3 class="subt">Datos de la licencia</h3>
+      <div class="grid-campos">
+        <div class="campo"><span class="et">Clase y categoría</span><span class="val">${escapa(t.categoria) || "—"}</span></div>
+        <div class="campo"><span class="et">Tipo de licencia</span><span class="val">${escapa(t.tipoLicencia) || "—"}</span></div>
+        <div class="campo"><span class="et">Restricciones</span><span class="val">${escapa(t.restricciones) || "Sin restricciones"}</span></div>
+        <div class="campo"><span class="et">Centro de emisión</span><span class="val">${escapa(t.centroEmision) || "—"}</span></div>
+        <div class="campo"><span class="et">Número de licencia</span><span class="val">${escapa(t.numeroLicencia) || "—"}</span></div>
+        <div class="campo"><span class="et">Fecha de expedición</span><span class="val">${escapa(t.fechaExpedicion) || "—"}</span></div>
+        <div class="campo"><span class="et">Vigente hasta</span><span class="val">${escapa(t.vigenteHasta) || "—"}</span></div>
+      </div>
+    </div>
+    <div class="sello"><span style="border-color:${colores[t.estado]};color:${colores[t.estado]}">${escapa((ESTADOS[t.estado]||{txt:t.estado}).txt.toUpperCase())}</span></div>
+    <div class="obs"><b>Observaciones:</b> ${escapa(t.observaciones) || "Sin observaciones."}</div>
+    <div class="firmas">
+      <div class="firma"><div class="linea"></div><b>${escapa(t.responsable) || "—"}</b><br><small>Responsable de trámite</small></div>
+      <div class="firma"><div class="linea"></div><b>${escapa(EMPRESA.nombre)}</b><br><small>Sello y firma de la oficina</small></div>
+    </div>
+    <div class="pie">${escapa(EMPRESA.direccion)}<br>
+    Documento interno de gestión emitido por ${escapa(EMPRESA.nombre)} el ${hoy.toLocaleDateString("es-PE")} a las ${hoy.toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"})}. No constituye documento oficial del Estado.</div>
+  </div>`;
+}
+function descargarConstancia(codigo, btnEl){
+  const t = (datos.tramites || []).find(x => x.codigo === codigo);
+  if (!t) return;
+  if (!window.jspdf || !window.html2canvas){
+    alert("No se pudo generar el PDF. Verifica tu conexión a internet e intenta de nuevo.");
+    return;
+  }
+  const cont = document.createElement("div");
+  cont.className = "oculto-offscreen";
+  cont.innerHTML = generarConstanciaHtml(t);
+  document.body.appendChild(cont);
+  const hoja = cont.querySelector(".hoja");
+  const textoOriginal = btnEl.textContent;
+  btnEl.disabled = true; btnEl.textContent = "Generando…";
+  html2canvas(hoja, { scale:2, useCORS:true }).then(canvas => {
+    const { jsPDF } = window.jspdf;
+    const img = canvas.toDataURL("image/jpeg", 0.95);
+    const pdf = new jsPDF({ unit:"pt", format:"a4" });
+    const pageW = pdf.internal.pageSize.getWidth(), pageH = pdf.internal.pageSize.getHeight();
+    const ratio = canvas.height / canvas.width;
+    let w = pageW - 40, h = w * ratio;
+    if (h > pageH - 40){ h = pageH - 40; w = h / ratio; }
+    pdf.addImage(img, "JPEG", (pageW - w) / 2, 20, w, h);
+    pdf.save(`constancia_${t.dni}.pdf`);
+    document.body.removeChild(cont);
+    btnEl.disabled = false; btnEl.textContent = textoOriginal;
+  }).catch(() => {
+    document.body.removeChild(cont);
+    btnEl.disabled = false; btnEl.textContent = textoOriginal;
+    alert("No se pudo generar el PDF. Verifica tu conexión a internet.");
+  });
+}
 const EST_PAP = {
   registrada: { txt:"Solicitud registrada correctamente.", etq:"REGISTRADA", color:"#F77F00", barra:15 },
   revision:   { txt:"Solicitud en revisión.",              etq:"EN REVISIÓN", color:"#E5B700", barra:45 },
@@ -165,7 +295,10 @@ const escapa = t => String(t ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'
     const logo = localStorage.getItem("mtc_logo");
     if (logo){
       const val = JSON.parse(logo);
-      if (val) $("marcaHeader").innerHTML = `<img src="${val}" style="height:34px;width:auto;object-fit:contain;background:#fff;border-radius:6px;padding:3px">`;
+      if (val){
+        $("marcaHeader").innerHTML = `<img src="${val}" style="height:34px;width:auto;object-fit:contain;background:#fff;border-radius:6px;padding:3px">`;
+        window.__logoGuardado = val;
+      }
     }
   }catch(_e){ /* se deja el texto de respaldo */ }
   // Igual que el logo: si desde el sistema interno se editó el texto del encabezado, se usa
@@ -197,6 +330,7 @@ function cambiarTab(tab){
   document.querySelectorAll("#tabsConsulta .tab-consulta").forEach(b => b.classList.toggle("activo", b.dataset.tab === tab));
   $("resultados").classList.toggle("oculto", tab !== "tramite");
   $("resultadosPapeletas").classList.toggle("oculto", tab !== "papeletas");
+  $("resultadosEvaluacion").classList.toggle("oculto", tab !== "evaluacion");
 }
 
 // Este portal no tiene servidor propio: solo lee un archivo que la oficina exporta a mano.
@@ -290,6 +424,31 @@ function tablaConsultaOficialHtml(co){
     </table></div>
   </div>`;
 }
+function renderEvaluacion(dni){
+  const propias = (datos.evaluaciones || []).filter(ev => ev.dni === dni);
+  if (!propias.length) return `<div class="card"><p style="color:var(--gris);font-size:13px">No encontramos evaluaciones registradas con ese DNI.</p></div>`;
+  return propias.map(ev => {
+    const aprobado = ev.resultado === "apto";
+    const badge = aprobado
+      ? `<span class="estado" style="background:var(--verde);font-size:15px;padding:9px 18px">✓ APTO</span>`
+      : `<span class="estado" style="background:var(--rojo);font-size:15px;padding:9px 18px">✕ NO APTO</span>`;
+    const categorias = (ev.categorias && ev.categorias.length) ? ev.categorias.join(", ") : "—";
+    return `<div class="tramite-card">
+      <div class="top">
+        <div>
+          <div class="tipo">${escapa(ev.nombres)} ${escapa(ev.apellidos)}</div>
+          <div class="meta">DNI ${escapa(ev.dni)}</div>
+        </div>
+        ${badge}
+      </div>
+      <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--borde)">
+        <span style="font-size:10.5px;font-weight:800;color:var(--gris);text-transform:uppercase;letter-spacing:.5px;display:block">Categorías</span>
+        <p style="font-size:20px;font-weight:800;color:var(--texto);margin-top:2px">${escapa(categorias)}</p>
+      </div>
+      <p class="meta" style="margin-top:8px">Evaluado el ${escapa(ev.fecha)}</p>
+    </div>`;
+  }).join("");
+}
 function renderPapeletas(dni){
   const propias = (datos.papeletas || []).filter(s => s.dni === dni);
   if (!propias.length) return `<div class="card"><p style="color:var(--gris);font-size:13px">No encontramos solicitudes de eliminación de papeletas registradas con ese DNI.</p></div>`;
@@ -329,9 +488,11 @@ async function buscar(){
   const msg = $("msg");
   const res = $("resultados");
   const resPap = $("resultadosPapeletas");
+  const resEval = $("resultadosEvaluacion");
   const tabs = $("tabsConsulta");
   res.innerHTML = "";
   resPap.innerHTML = "";
+  resEval.innerHTML = "";
   tabs.classList.add("oculto");
   if (!/^\d{8}$/.test(dni)){ msg.textContent = "Ingresa un DNI válido de 8 dígitos."; return; }
   if (datos === null) await cargarDatos();
@@ -341,14 +502,16 @@ async function buscar(){
   }
   const coincidencias = (datos.tramites || []).filter(x => x.dni === dni);
   const tienePapeletas = (datos.papeletas || []).some(x => x.dni === dni);
-  if (!coincidencias.length && !tienePapeletas){
-    msg.textContent = "No encontramos trámites ni solicitudes registradas con ese DNI.";
+  const tieneEvaluacion = (datos.evaluaciones || []).some(x => x.dni === dni);
+  if (!coincidencias.length && !tienePapeletas && !tieneEvaluacion){
+    msg.textContent = "No encontramos trámites, solicitudes ni evaluaciones registradas con ese DNI.";
     return;
   }
   msg.textContent = "";
   tabs.classList.remove("oculto");
-  cambiarTab(coincidencias.length ? "tramite" : "papeletas");
+  cambiarTab(coincidencias.length ? "tramite" : (tienePapeletas ? "papeletas" : "evaluacion"));
   resPap.innerHTML = renderPapeletas(dni);
+  resEval.innerHTML = renderEvaluacion(dni);
   if (!coincidencias.length){
     res.innerHTML = `<div class="card"><p style="color:var(--gris);font-size:13px">Este DNI no tiene trámites de licencia registrados.</p></div>`;
     return;
@@ -401,6 +564,7 @@ async function buscar(){
       </div>
       ${cargaHtml}
       ${docsHtml}
+      <button type="button" class="btn-constancia" onclick="descargarConstancia('${t.codigo}', this)">📥 Descargar constancia PDF</button>
     </div>`;
 
     if (!t.numeroLicencia) return tramiteCard;
