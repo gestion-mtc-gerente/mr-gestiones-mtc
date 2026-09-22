@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consulta de Constancia</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root{
+  --rojo:#D62828; --rojo-osc:#A31F1F; --rojo-suave:#FDECEC;
+  --fondo:#F6F4F4; --borde:#E6DEDE; --texto:#292222; --gris:#8B7F7F;
+  --naranja:#F77F00; --verde:#1B9E4B; --azul:#2264D1;
+  --sombra:0 2px 12px rgba(0,0,0,.06);
+}
+*{box-sizing:border-box; margin:0}
+body{font-family:'Segoe UI',system-ui,sans-serif; background:var(--fondo); color:var(--texto); min-height:100vh}
+button{font-family:inherit; cursor:pointer}
+input{font-family:inherit; font-size:15px; width:100%; padding:12px 14px; border:1px solid var(--borde); border-radius:10px; background:#FBFAFA; outline:none}
+input:focus{border-color:var(--rojo)}
+.btn{background:var(--rojo); color:#fff; border:none; border-radius:10px; padding:13px 18px; font-weight:700; font-size:14px; letter-spacing:.5px}
+.btn:hover{background:var(--rojo-osc)}
+.btn:disabled{opacity:.6; cursor:default}
+.btn-sec{background:#fff; color:var(--texto); border:1px solid var(--borde); border-radius:10px; padding:11px 16px; font-weight:700; font-size:13px}
+.btn-sec:hover{border-color:var(--rojo); color:var(--rojo)}
+header{background:var(--rojo-osc); color:#fff; padding:14px 20px}
+header .marca{font-weight:900; letter-spacing:1px; font-size:16px; display:flex; align-items:center; gap:8px}
+header .marca .tag{background:#fff; color:var(--rojo-osc); font-size:11px; font-weight:900; padding:2px 9px; border-radius:5px; letter-spacing:1px}
+header .sub{font-size:12px; opacity:.85; margin-top:4px}
+.contenedor{max-width:760px; margin:0 auto; padding:28px 18px 60px}
+.card{background:#fff; border:1px solid var(--borde); border-radius:14px; padding:22px; box-shadow:var(--sombra)}
+.card h1{font-size:19px; margin-bottom:4px}
+.card p.desc{font-size:13px; color:var(--gris); margin-bottom:18px}
+.fila-busqueda{display:flex; gap:10px}
+.fila-busqueda input{flex:1}
+.msg{font-size:13px; font-weight:700; margin-top:14px; text-align:center}
+.oculto{display:none!important}
+.lista-tramites{margin-top:18px; display:flex; flex-direction:column; gap:10px}
+.opcion-tramite{border:1px solid var(--borde); border-radius:12px; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; gap:10px; background:#fff}
+.opcion-tramite b{font-size:14px}
+.opcion-tramite span{font-size:12px; color:var(--gris); display:block; margin-top:2px}
+.estado{display:inline-block; padding:5px 12px; border-radius:20px; font-size:11px; font-weight:800; letter-spacing:.5px; color:#fff; white-space:nowrap}
+.e-tramite{background:var(--naranja)} .e-aprobado{background:var(--verde)}
+.e-observado{background:var(--rojo)} .e-finalizado{background:var(--azul)}
+.acciones-constancia{display:flex; gap:10px; flex-wrap:wrap; margin:18px 0}
+
+/* ===== Documento de constancia (mismo diseño que usa la oficina internamente) ===== */
+.hoja{max-width:720px; margin:0 auto; border:1px solid #e0e0e0; border-radius:12px; overflow:hidden; background:#fff}
+.hoja .cab{background:#D62828; color:#fff; padding:22px 28px}
+.hoja .cab table{width:100%; border-collapse:collapse}
+.hoja .marca-doc{font-size:26px; font-weight:900; letter-spacing:2px}
+.hoja .rubro{font-size:12px; opacity:.9; letter-spacing:1px}
+.hoja .cod{text-align:right; font-size:11px; opacity:.9}
+.hoja .cod b{font-size:15px; letter-spacing:1px}
+.hoja .titulo{text-align:center; padding:20px; border-bottom:2px solid #FDECEC}
+.hoja .titulo h2{font-size:20px; letter-spacing:3px; margin:0}
+.hoja .titulo p{font-size:12px; color:#8B7F7F; margin:4px 0 0; letter-spacing:1px}
+.hoja .cuerpo{padding:24px 28px 4px; display:flex; gap:24px; flex-wrap:wrap}
+.hoja .datos{flex:1; min-width:260px}
+.hoja .grid-campos{display:grid; grid-template-columns:1fr 1fr; gap:12px 20px}
+.hoja .campo{border-bottom:1px solid #f2eded; padding-bottom:7px}
+.hoja .campo .et{display:block; font-size:10px; font-weight:700; color:#8B7F7F; text-transform:uppercase; letter-spacing:.5px}
+.hoja .campo .val{display:block; font-size:13.5px; font-weight:600; color:#292222; margin-top:3px}
+.hoja .seccion-licencia{padding:6px 28px 4px}
+.hoja .seccion-licencia .subt{font-size:12px; font-weight:800; color:#D62828; text-transform:uppercase; letter-spacing:.5px; margin:0 0 12px; padding-top:14px; border-top:1px solid #FDECEC}
+.hoja .foto img{width:110px; height:138px; object-fit:cover; border-radius:8px; border:1px solid #ccc}
+.hoja .sello{text-align:center; margin:8px 0 22px}
+.hoja .sello span{display:inline-block; border:3px solid #999; color:#999; font-weight:900; font-size:19px; letter-spacing:3px; padding:10px 26px; border-radius:10px; transform:rotate(-4deg)}
+.hoja .obs{padding:0 28px 10px; font-size:12px}
+.hoja .firmas{display:flex; justify-content:space-around; padding:34px 28px 22px; flex-wrap:wrap; gap:16px}
+.hoja .firma{text-align:center; width:220px}
+.hoja .linea{border-top:1px solid #333; margin-bottom:6px}
+.hoja .firma small{color:#8B7F7F; font-size:11px}
+.hoja .pie{background:#faf8f8; padding:12px 28px; font-size:10px; color:#8B7F7F; text-align:center; border-top:1px solid #eee}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="marca" id="marcaHeader"><span class="tag">MTC</span> MR GESTIONES</div>
+  <div class="sub" id="subHeader">Consulta y descarga de tu constancia de trámite</div>
+</header>
+
+<div class="contenedor">
+  <div class="card">
+    <h1>Consulta de constancia</h1>
+    <p class="desc">Ingresa tu número de DNI para ver y descargar la constancia de tu trámite, con toda la información registrada.</p>
+    <div class="fila-busqueda">
+      <input id="dniInput" maxlength="8" inputmode="numeric" placeholder="Tu número de DNI">
+      <button class="btn" onclick="buscar()">BUSCAR</button>
+    </div>
+    <p class="msg" id="msg"></p>
+  </div>
+
+  <div id="listaZona"></div>
+  <div id="constanciaZona"></div>
+
+  <p style="font-size:12px; color:var(--gris); text-align:center; margin-top:26px; line-height:1.6">
+    MR GESTIONES es una empresa privada de asesoría en trámites — no somos una entidad del Estado.<br>
+    Esta constancia es un comprobante interno de gestión, no un documento oficial del MTC ni de RENIEC.
+  </p>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const escapa = t => String(t ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const TIPOS = { nueva:"Nueva licencia", revalidacion:"Revalidación", recategorizacion:"Recategorización", retenciones:"Retenciones" };
+const ESTADOS = {
+  tramite:    { txt:"Trámite en proceso", clase:"e-tramite" },
+  aprobado:   { txt:"Trámite aprobado",   clase:"e-aprobado" },
+  observado:  { txt:"Trámite observado",  clase:"e-observado" },
+  finalizado: { txt:"Trámite finalizado", clase:"e-finalizado" }
+};
+const EMPRESA = { nombre:"MR GESTIONES", rubro:"Gestión y asesoría de trámites", direccion:"Lima — Perú", telefono:"", correo:"" };
+
+// Igual que en consulta-tramite.html: si desde el sistema interno se subió un logo o se editó
+// el texto del encabezado, y este archivo se abre en el mismo dispositivo/navegador, se usa
+// aquí también (mismo dominio → mismo localStorage). Si no, se deja el texto de respaldo.
+let logoGuardado = null;
+(() => {
+  try{
+    const logo = localStorage.getItem("mtc_logo");
+    if (logo){
+      logoGuardado = JSON.parse(logo);
+      if (logoGuardado) $("marcaHeader").innerHTML = `<img src="${logoGuardado}" style="height:34px;width:auto;object-fit:contain;background:#fff;border-radius:6px;padding:3px">`;
+    }
+  }catch(_e){ /* se deja el texto de respaldo */ }
+})();
+
+let datos = null;
+async function cargarDatos(){
+  try{
+    const r = await fetch("datos-publicos.json", { cache:"no-store" });
+    if (!r.ok) throw new Error("no-ok");
+    const crudo = await r.json();
+    datos = Array.isArray(crudo) ? { tramites: crudo, papeletas: [] } : crudo;
+  }catch(e){
+    datos = null;
+  }
+}
+
+function tramitesDe(dni){
+  if (!datos || !datos.tramites) return [];
+  return datos.tramites.filter(t => t.dni === dni);
+}
+
+async function buscar(){
+  const msg = $("msg");
+  const dni = $("dniInput").value.trim();
+  $("listaZona").innerHTML = "";
+  $("constanciaZona").innerHTML = "";
+  if (!/^\d{8}$/.test(dni)){ msg.style.color = "var(--rojo)"; msg.textContent = "Ingresa un DNI válido de 8 dígitos."; return; }
+  if (!datos) await cargarDatos();
+  if (!datos){ msg.style.color = "var(--rojo)"; msg.textContent = "No se pudo cargar la información. Verifica tu conexión e intenta de nuevo."; return; }
+  const encontrados = tramitesDe(dni);
+  if (!encontrados.length){ msg.style.color = "var(--rojo)"; msg.textContent = "No se encontró ningún trámite registrado con ese DNI."; return; }
+  msg.textContent = "";
+  if (encontrados.length === 1){
+    mostrarConstancia(encontrados[0]);
+  }else{
+    mostrarLista(encontrados);
+  }
+}
+
+function mostrarLista(lista){
+  $("listaZona").innerHTML = `
+    <div class="card" style="margin-top:18px">
+      <h1 style="font-size:16px">Tienes ${lista.length} trámites registrados</h1>
+      <p class="desc">Elige cuál constancia quieres ver.</p>
+      <div class="lista-tramites">
+        ${lista.map((t,i) => {
+          const e = ESTADOS[t.estado] || { txt:t.estado, clase:"e-tramite" };
+          return `<div class="opcion-tramite">
+            <div><b>${escapa(TIPOS[t.tipo] || t.tipo)}</b><span>Código ${escapa(t.codigo)} · Registrado el ${escapa(t.fechaRegistro)}</span></div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span class="estado ${e.clase}">${escapa(e.txt)}</span>
+              <button class="btn-sec" onclick='mostrarConstanciaIndice(${i})'>Ver</button>
+            </div>
+          </div>`;
+        }).join("")}
+      </div>
+    </div>`;
+  window.__listaActual = lista;
+}
+function mostrarConstanciaIndice(i){ mostrarConstancia(window.__listaActual[i]); }
+
+function generarConstanciaHtml(t){
+  const colores = { tramite:"#F77F00", aprobado:"#1B9E4B", observado:"#D62828", finalizado:"#2264D1" };
+  const hoy = new Date();
+  const foto = t.foto
+    ? `<img src="${t.foto}">`
+    : `<div style="width:110px;height:138px;border:1px dashed #bbb;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:38px">&#128100;</div>`;
+  const logoHeader = logoGuardado
+    ? `<img src="${logoGuardado}" style="height:44px;width:auto;object-fit:contain;background:#fff;border-radius:6px;padding:4px">`
+    : `<div class="marca-doc">${escapa(EMPRESA.nombre)}</div>`;
+  const subtitulos = {
+    nueva:"GESTIÓN DE NUEVA LICENCIA", revalidacion:"GESTIÓN DE REVALIDACIÓN",
+    recategorizacion:"GESTIÓN DE RECATEGORIZACIÓN", retenciones:"GESTIÓN DE RETENCIÓN"
+  };
+  const codigoVerificacion = "VF-" + t.dni + "-" + String(t.codigo).slice(-4);
+  return `<div class="hoja" id="hojaConstancia">
+    <div class="cab"><table><tr>
+      <td style="width:1%;white-space:nowrap;vertical-align:middle">${logoHeader}</td>
+      <td style="vertical-align:middle;padding-left:12px"><div class="rubro">${escapa(EMPRESA.rubro)}</div></td>
+      <td class="cod" style="vertical-align:middle;white-space:nowrap">N° DE EXPEDIENTE<br><b>${escapa(t.codigo)}</b></td>
+    </tr></table></div>
+    <div class="titulo"><h2>CONSTANCIA DE TRÁMITE</h2><p>${subtitulos[t.tipo] || ""}</p></div>
+    <div class="cuerpo">
+      <div class="datos"><div class="grid-campos">
+        <div class="campo"><span class="et">Cliente</span><span class="val"><b>${escapa(t.nombres)} ${escapa(t.apellidos)}</b></span></div>
+        <div class="campo"><span class="et">DNI</span><span class="val">${escapa(t.dni)}</span></div>
+        <div class="campo"><span class="et">Teléfono</span><span class="val">${escapa(t.telefono) || "—"}</span></div>
+        <div class="campo"><span class="et">Dirección</span><span class="val">${escapa(t.direccion) || "—"}</span></div>
+        <div class="campo"><span class="et">Tipo de trámite</span><span class="val">${escapa(TIPOS[t.tipo] || t.tipo)}</span></div>
+        <div class="campo"><span class="et">Sede</span><span class="val">${escapa(t.sede) || escapa(EMPRESA.direccion)}</span></div>
+        <div class="campo"><span class="et">Fecha de ingreso</span><span class="val">${escapa(t.fechaRegistro)}</span></div>
+        <div class="campo"><span class="et">Fecha de finalización</span><span class="val">${escapa(t.fechaFin) || "—"}</span></div>
+        <div class="campo"><span class="et">Responsable</span><span class="val">${escapa(t.responsable) || "—"}</span></div>
+        <div class="campo"><span class="et">Cód. verificación</span><span class="val">${escapa(codigoVerificacion)}</span></div>
+      </div></div>
+      <div class="foto" style="text-align:center">${foto}<div style="font-size:10px;color:#8B7F7F;margin-top:6px">FOTO DEL CLIENTE</div></div>
+    </div>
+    <div class="seccion-licencia">
+      <h3 class="subt">Datos de la licencia</h3>
+      <div class="grid-campos">
+        <div class="campo"><span class="et">Clase y categoría</span><span class="val">${escapa(t.categoria) || "—"}</span></div>
+        <div class="campo"><span class="et">Tipo de licencia</span><span class="val">${escapa(t.tipoLicencia) || "—"}</span></div>
+        <div class="campo"><span class="et">Restricciones</span><span class="val">${escapa(t.restricciones) || "Sin restricciones"}</span></div>
+        <div class="campo"><span class="et">Centro de emisión</span><span class="val">${escapa(t.centroEmision) || "—"}</span></div>
+        <div class="campo"><span class="et">Número de licencia</span><span class="val">${escapa(t.numeroLicencia) || "—"}</span></div>
+        <div class="campo"><span class="et">Fecha de expedición</span><span class="val">${escapa(t.fechaExpedicion) || "—"}</span></div>
+        <div class="campo"><span class="et">Vigente hasta</span><span class="val">${escapa(t.vigenteHasta) || "—"}</span></div>
+      </div>
+    </div>
+    <div class="sello"><span style="border-color:${colores[t.estado]};color:${colores[t.estado]}">${escapa((ESTADOS[t.estado]||{txt:t.estado}).txt.toUpperCase())}</span></div>
+    <div class="obs"><b>Observaciones:</b> ${escapa(t.observaciones) || "Sin observaciones."}</div>
+    <div class="firmas">
+      <div class="firma"><div class="linea"></div><b>${escapa(t.responsable) || "—"}</b><br><small>Responsable de trámite</small></div>
+      <div class="firma"><div class="linea"></div><b>${escapa(EMPRESA.nombre)}</b><br><small>Sello y firma de la oficina</small></div>
+    </div>
+    <div class="pie">${escapa(EMPRESA.direccion)}<br>
+    Documento interno de gestión emitido por ${escapa(EMPRESA.nombre)} el ${hoy.toLocaleDateString("es-PE")} a las ${hoy.toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"})}. No constituye documento oficial del Estado.</div>
+  </div>`;
+}
+
+function mostrarConstancia(t){
+  $("listaZona").innerHTML = "";
+  $("constanciaZona").innerHTML = `
+    <div class="acciones-constancia">
+      <button class="btn" id="btnDescargar" onclick="descargarPDF()">📥 DESCARGAR PDF</button>
+      <button class="btn-sec" onclick="location.reload()">🔍 Buscar otro DNI</button>
+    </div>
+    ${generarConstanciaHtml(t)}`;
+  window.__tramiteActual = t;
+  window.scrollTo({ top: document.getElementById("constanciaZona").offsetTop - 10, behavior:"smooth" });
+}
+
+function descargarPDF(){
+  const boton = $("btnDescargar");
+  const cont = $("hojaConstancia");
+  if (!cont || !window.jspdf || !window.html2canvas){
+    alert("No se pudo generar el PDF. Verifica tu conexión a internet e intenta de nuevo.");
+    return;
+  }
+  boton.disabled = true; boton.textContent = "Generando…";
+  html2canvas(cont, { scale:2, useCORS:true }).then(canvas => {
+    const { jsPDF } = window.jspdf;
+    const img = canvas.toDataURL("image/jpeg", 0.95);
+    const pdf = new jsPDF({ unit:"pt", format:"a4" });
+    const pageW = pdf.internal.pageSize.getWidth(), pageH = pdf.internal.pageSize.getHeight();
+    const ratio = canvas.height / canvas.width;
+    let w = pageW - 40, h = w * ratio;
+    if (h > pageH - 40){ h = pageH - 40; w = h / ratio; }
+    pdf.addImage(img, "JPEG", (pageW - w) / 2, 20, w, h);
+    pdf.save(`constancia_${window.__tramiteActual.dni}.pdf`);
+    boton.disabled = false; boton.textContent = "📥 DESCARGAR PDF";
+  }).catch(() => {
+    boton.disabled = false; boton.textContent = "📥 DESCARGAR PDF";
+    alert("No se pudo generar el PDF. Verifica tu conexión a internet.");
+  });
+}
+
+// Si el link ya trae el DNI (ej. constancia.html?dni=12345678), se busca directo.
+(async () => {
+  await cargarDatos();
+  const params = new URLSearchParams(location.search);
+  const dniUrl = params.get("dni");
+  if (dniUrl && /^\d{8}$/.test(dniUrl)){
+    $("dniInput").value = dniUrl;
+    buscar();
+  }
+})();
+$("dniInput").addEventListener("keydown", e => { if (e.key === "Enter") buscar(); });
+</script>
+</body>
+</html>

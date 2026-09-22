@@ -3487,7 +3487,7 @@ function vistaBackup(){
     <h1 class="titulo-vista">Copia de seguridad y portal</h1>
     <div class="card" style="max-width:520px;margin-bottom:16px;border-left:4px solid var(--rojo)">
       <h3 style="font-size:15px;margin-bottom:8px">🌐 Publicar datos al portal de clientes</h3>
-      <p style="font-size:13px;color:var(--gris);margin-bottom:14px">Genera el archivo <b>datos-publicos.json</b> con los datos que el cliente ve al consultar con su DNI (nombres, tipo, estado, fechas, código y los datos de su licencia una vez emitida). No incluye teléfono, correo, dirección, fotos ni documentos. Súbelo a la misma carpeta del portal de consulta para que tus clientes vean el estado actualizado. Hazlo cada vez que cambies estados.</p>
+      <p style="font-size:13px;color:var(--gris);margin-bottom:14px">Genera el archivo <b>datos-publicos.json</b> con los datos que el cliente ve al consultar con su DNI: nombres, tipo, estado, fechas, código, los datos de su licencia una vez emitida, teléfono, dirección, foto, observaciones y los documentos que subiste (necesarios para armar su constancia descargable). No incluye correo. Súbelo a la misma carpeta del portal de consulta y de constancia.html para que tus clientes vean el estado actualizado. Hazlo cada vez que cambies estados.</p>
       <button class="btn" style="width:100%" onclick="publicarPortal()">⬆️ GENERAR datos-publicos.json</button>
     </div>
     <div class="card" style="max-width:520px">
@@ -3510,6 +3510,11 @@ function publicarPortal(){
     restricciones: e.restricciones || "", centroEmision: e.centroEmision || "",
     numeroLicencia: e.numeroLicencia || "", fechaExpedicion: e.fechaExpedicion || "",
     vigenteHasta: e.vigenteHasta || "",
+    // Estos campos solo se usan para armar la constancia descargable en constancia.html — antes
+    // no se exportaban (por privacidad), pero la constancia completa los necesita.
+    telefono: e.telefono || "", direccion: e.direccion || "", foto: e.foto || null,
+    observaciones: e.observaciones || "", sede: e.sede || "", fechaFin: e.fechaFin || "",
+    responsable: e.responsable || "",
     docs: (e.docs || []).map(d => ({ nombre: d.nombre, data: d.data }))
   }));
   // Las papeletas se exportan con los datos del catálogo ya resueltos (puntos, multa, nivel)
