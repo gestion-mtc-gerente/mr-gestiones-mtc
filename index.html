@@ -88,7 +88,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--rojo)}
 #headerMTC .hm-top{display:flex; align-items:center; gap:10px; padding:9px 0; flex-wrap:wrap}
 #headerMTC .hm-marca{font-weight:900; letter-spacing:1px; font-size:14px; display:flex; align-items:center; gap:8px}
 #headerMTC .hm-marca .tag{background:#fff; color:var(--rojo-osc); font-size:10px; font-weight:900; padding:2px 8px; border-radius:5px; letter-spacing:1px}
-#headerMTC .hm-sub{font-size:11px; opacity:.85; flex:1; min-width:180px}
+#headerMTC .hm-centro{flex:1; min-width:220px; padding-left:14px}
+#headerMTC .hm-titulo{font-size:32px; font-weight:900; letter-spacing:2px; line-height:1.1; text-transform:uppercase}
+#headerMTC .hm-sub{font-size:11px; opacity:.85; margin-top:3px}
+@media(max-width:600px){#headerMTC .hm-titulo{font-size:20px; letter-spacing:1px}}
 #headerMTC .hm-sub-editar{background:none; border:none; color:#fff; opacity:.7; font-size:11px; cursor:pointer; padding:2px 4px; vertical-align:middle}
 #headerMTC .hm-sub-editar:hover{opacity:1}
 #headerMTC .hm-pdf{display:flex; gap:6px; align-items:center; flex-wrap:wrap}
@@ -268,7 +271,10 @@ h1.titulo-vista{font-size:22px; font-weight:900; margin-bottom:16px}
   <div id="headerMTC">
     <div class="hm-top">
       <div class="hm-marca" id="hmMarca"></div>
-      <div class="hm-sub"><span id="hmSubTexto"></span> <button type="button" class="hm-sub-editar" onclick="abrirEditarSubtitulo()" title="Editar este texto">✏️</button></div>
+      <div class="hm-centro">
+        <div class="hm-titulo">Sistema de gestiones</div>
+        <div class="hm-sub"><span id="hmSubTexto"></span> <button type="button" class="hm-sub-editar" onclick="abrirEditarSubtitulo()" title="Editar este texto">✏️</button></div>
+      </div>
       <div class="hm-pdf">
         <input id="hmDni" maxlength="8" inputmode="numeric" placeholder="DNI del cliente">
         <button onclick="generarPDFdesdeHeader()">📥 Generar PDF de constancia</button>
