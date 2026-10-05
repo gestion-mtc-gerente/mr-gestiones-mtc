@@ -408,6 +408,15 @@ async function iniciarSincronizacionNube(){
     if (sesion) irVista(vistaActual);
   }, err => console.error("Firestore evaluaciones:", err));
 
+  // "Cerrar sesión en todos los dispositivos": cualquier sesión iniciada antes de esa marca se cierra sola.
+  dbCloud.collection("meta").doc("sesiones").onSnapshot(snap => {
+    const corte = snap.exists ? (snap.data().cerrarDesde || 0) : 0;
+    if (sesion && corte > sesionInicioMs){
+      cerrarSesion();
+      alert("Se cerró tu sesión porque se pidió cerrar sesión en todos los dispositivos. Vuelve a iniciar sesión.");
+    }
+  }, err => console.error("Firestore sesiones:", err));
+
   dbCloud.collection("meta").doc("catalogo").onSnapshot(snap => {
     if (snap.exists && snap.data().datos){
       catalogo = snap.data().datos;
@@ -455,6 +464,7 @@ let logoEmpresa  = lee("mtc_logo", null);
 const SUBTITULO_HEADER_DEFECTO = "Gestión y asesoría de trámites — empresa privada, no somos una entidad del Estado";
 let hmSubtitulo  = lee("mtc_hm_subtitulo", SUBTITULO_HEADER_DEFECTO);
 let sesion       = null;
+let sesionInicioMs = 0; // momento en que esta sesión inició; se compara con "cerrar todas las sesiones"
 let vistaActual  = "dashboard";
 let fotoEscaneada = null; // foto recortada automáticamente de la ficha RENIEC, pendiente de guardar
 
@@ -491,7 +501,7 @@ function pintarIconoOjo(btn, visible){
     guarda("mtc_usuarios", usuarios);
   }
   const rec = lee("mtc_sesion", null);
-  if (rec) entrar(rec.user);
+  if (rec) entrar(rec.user, rec.desde || 0);
   pintarIconoOjo($("ojoLogUser"), false);
   pintarIconoOjo($("ojoLogPass"), false);
   pintarLogoHeaderTop();
@@ -530,11 +540,13 @@ async function iniciarSesion(){
     msg.textContent = "Usuario o contraseña incorrectos.";
     return;
   }
-  if ($("logRecordar").checked) guarda("mtc_sesion", { user:u });
-  entrar(u);
+  const desde = Date.now();
+  if ($("logRecordar").checked) guarda("mtc_sesion", { user:u, desde });
+  entrar(u, desde);
   log("Inició sesión");
 }
-function entrar(userName){
+function entrar(userName, desde){
+  sesionInicioMs = desde || 0;
   const u = usuarios.find(x => x.user === userName);
   if (!u) return;
   sesion = u;
@@ -567,6 +579,17 @@ function alternarVerCampo(idCampo, btn){
   input.type = verlo ? "text" : "password";
   btn.classList.toggle("activo", verlo);
   pintarIconoOjo(btn, verlo);
+}
+async function cerrarSesionesTodas(){
+  if (!nubeConectada) return alert("Se necesita conexión a la nube para cerrar las sesiones de los demás dispositivos. Revisa tu internet e intenta de nuevo.");
+  if (!confirm("¿Cerrar la sesión en TODOS los dispositivos, incluido este? Tendrás que volver a iniciar sesión en cada uno.")) return;
+  try{
+    await dbCloud.collection("meta").doc("sesiones").set({ cerrarDesde: Date.now() });
+  }catch(err){
+    console.error("Cerrar sesiones:", err);
+    return alert("No se pudo avisar a los demás dispositivos. Intenta de nuevo.");
+  }
+  cerrarSesion();
 }
 function actualizarAvatarLogin(){
   const val = $("logUser").value.trim();
@@ -3487,6 +3510,11 @@ function vistaUsuarios(){
     </td></tr>`).join("");
   return `
     <h1 class="titulo-vista">Usuarios del sistema</h1>
+    <div class="card" style="max-width:520px;margin-bottom:16px">
+      <h3 style="font-size:15px;margin-bottom:6px">🔒 Sesiones abiertas</h3>
+      <p style="font-size:12.5px;color:var(--gris);margin-bottom:12px">Cierra la sesión en todos tus dispositivos (computadora, celular, etc.). Cada uno te pedirá usuario y contraseña de nuevo.</p>
+      <button class="btn" onclick="cerrarSesionesTodas()">CERRAR SESIÓN EN TODOS LOS DISPOSITIVOS</button>
+    </div>
     <div class="card" style="max-width:520px;margin-bottom:16px">
       <h3 style="font-size:15px;margin-bottom:10px">➕ Crear usuario</h3>
       <div class="form-grid">
