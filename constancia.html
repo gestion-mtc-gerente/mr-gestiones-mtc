@@ -6,6 +6,9 @@
 <title>Consulta de Constancia</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
 <style>
 :root{
   --rojo:#D62828; --rojo-osc:#A31F1F; --rojo-suave:#FDECEC;
@@ -127,21 +130,57 @@ let logoGuardado = null;
   }catch(_e){ /* se deja el texto de respaldo */ }
 })();
 
-let datos = null;
-async function cargarDatos(){
+// ---------- Datos en vivo (Firestore, sesión anónima de solo lectura) ----------
+// Igual que consulta-tramite.html: lee en vivo de la nube (reglas de solo lectura para el
+// público), con el archivo estático como respaldo si la nube no responde.
+const firebaseConfig = {
+  apiKey: "AIzaSyA6VtplK2yA0jarjEcLz1Y4PT7EsA_zaDA",
+  authDomain: "mtc-gestion-666ee.firebaseapp.com",
+  projectId: "mtc-gestion-666ee",
+  storageBucket: "mtc-gestion-666ee.firebasestorage.app",
+  messagingSenderId: "362415983939",
+  appId: "1:362415983939:web:34a7b127a00c190d1e73f6"
+};
+let dbCloud = null;
+try{
+  if (typeof firebase !== "undefined"){
+    firebase.initializeApp(firebaseConfig);
+    dbCloud = firebase.firestore();
+    firebase.auth().signInAnonymously().catch(err => console.error("Firebase auth:", err));
+  }
+}catch(_e){ /* sin nube: se intenta el archivo estático como respaldo */ }
+
+function moldearTramitePublico(e){
+  return {
+    dni: e.dni, nombres: e.nombres, apellidos: e.apellidos,
+    tipo: e.tipo, estado: e.estado,
+    fechaRegistro: e.fechaRegistro,
+    actualizado: (e.historial && e.historial[0] ? e.historial[0].fecha : e.fechaRegistro),
+    codigo: (e.id || "").replace("E","EXP-"),
+    categoria: e.categoria || "", aptitud: e.aptitud || "", tipoLicencia: e.tipoLicencia || "",
+    restricciones: e.restricciones || "", centroEmision: e.centroEmision || "",
+    numeroLicencia: e.numeroLicencia || "", fechaExpedicion: e.fechaExpedicion || "",
+    vigenteHasta: e.vigenteHasta || "",
+    direccion: e.direccion || "", foto: e.foto || null,
+    observaciones: e.observaciones || "", sede: e.sede || "", fechaFin: e.fechaFin || "",
+    responsable: e.responsable || "",
+    docs: (e.docs || []).map(d => ({ nombre: d.nombre, data: d.data }))
+  };
+}
+async function tramitesDe(dni){
+  if (dbCloud){
+    try{
+      const snap = await dbCloud.collection("expedientes").where("dni","==",dni).get();
+      return snap.docs.map(d => moldearTramitePublico(d.data()));
+    }catch(err){ console.error("Firestore (constancia):", err); /* sigue al respaldo de abajo */ }
+  }
   try{
     const r = await fetch("datos-publicos.json", { cache:"no-store" });
     if (!r.ok) throw new Error("no-ok");
     const crudo = await r.json();
-    datos = Array.isArray(crudo) ? { tramites: crudo, papeletas: [] } : crudo;
-  }catch(e){
-    datos = null;
-  }
-}
-
-function tramitesDe(dni){
-  if (!datos || !datos.tramites) return [];
-  return datos.tramites.filter(t => t.dni === dni);
+    const d = Array.isArray(crudo) ? { tramites: crudo } : crudo;
+    return (d.tramites || []).filter(t => t.dni === dni);
+  }catch(_e){ return null; }
 }
 
 async function buscar(){
@@ -150,9 +189,9 @@ async function buscar(){
   $("listaZona").innerHTML = "";
   $("constanciaZona").innerHTML = "";
   if (!/^\d{8}$/.test(dni)){ msg.style.color = "var(--rojo)"; msg.textContent = "Ingresa un DNI válido de 8 dígitos."; return; }
-  if (!datos) await cargarDatos();
-  if (!datos){ msg.style.color = "var(--rojo)"; msg.textContent = "No se pudo cargar la información. Verifica tu conexión e intenta de nuevo."; return; }
-  const encontrados = tramitesDe(dni);
+  msg.style.color = "var(--gris)"; msg.textContent = "Buscando…";
+  const encontrados = await tramitesDe(dni);
+  if (encontrados === null){ msg.style.color = "var(--rojo)"; msg.textContent = "No se pudo cargar la información. Verifica tu conexión e intenta de nuevo."; return; }
   if (!encontrados.length){ msg.style.color = "var(--rojo)"; msg.textContent = "No se encontró ningún trámite registrado con ese DNI."; return; }
   msg.textContent = "";
   if (encontrados.length === 1){
@@ -209,7 +248,6 @@ function generarConstanciaHtml(t){
       <div class="datos"><div class="grid-campos">
         <div class="campo"><span class="et">Cliente</span><span class="val"><b>${escapa(t.nombres)} ${escapa(t.apellidos)}</b></span></div>
         <div class="campo"><span class="et">DNI</span><span class="val">${escapa(t.dni)}</span></div>
-        <div class="campo"><span class="et">Teléfono</span><span class="val">${escapa(t.telefono) || "—"}</span></div>
         <div class="campo"><span class="et">Dirección</span><span class="val">${escapa(t.direccion) || "—"}</span></div>
         <div class="campo"><span class="et">Tipo de trámite</span><span class="val">${escapa(TIPOS[t.tipo] || t.tipo)}</span></div>
         <div class="campo"><span class="et">Sede</span><span class="val">${escapa(t.sede) || escapa(EMPRESA.direccion)}</span></div>
@@ -282,7 +320,6 @@ function descargarPDF(){
 
 // Si el link ya trae el DNI (ej. constancia.html?dni=12345678), se busca directo.
 (async () => {
-  await cargarDatos();
   const params = new URLSearchParams(location.search);
   const dniUrl = params.get("dni");
   if (dniUrl && /^\d{8}$/.test(dniUrl)){

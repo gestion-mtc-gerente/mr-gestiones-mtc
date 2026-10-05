@@ -283,8 +283,6 @@ h1.titulo-vista{font-size:22px; font-weight:900; margin-bottom:16px}
     <button class="nav activo" data-vista="dashboard" onclick="irVista('dashboard')">📊 Panel principal</button>
     <div class="seccion">Módulos</div>
     <button class="nav" data-vista="nueva" onclick="irVista('nueva')">🪪 Nueva licencia</button>
-    <button class="nav" data-vista="revalidacion" onclick="irVista('revalidacion')">🔄 Revalidación</button>
-    <button class="nav" data-vista="recategorizacion" onclick="irVista('recategorizacion')">⬆️ Recategorización</button>
     <button class="nav" data-vista="evaluacion" onclick="irVista('evaluacion')">👤 Evaluación</button>
     <button class="nav" data-vista="retenciones" onclick="irVista('retenciones')">📌 Retenciones</button>
     <button class="nav" data-vista="todos" onclick="irVista('todos')">📁 Todos los trámites</button>
@@ -354,11 +352,18 @@ const firebaseConfig = {
 };
 let nubeConectada = false;
 let dbCloud = null;
+// Cuenta de Firebase exclusiva para que ESTE sistema (el del personal) pueda escribir en la
+// nube. La página pública de consulta usa una sesión anónima aparte, que las reglas de
+// Firestore solo dejan LEER — así un visitante cualquiera nunca puede alterar tus trámites
+// reales, aunque abra la consola del navegador.
+const PERSONAL_FB_CORREO = "personal@mrgestiones-mtc.app";
+const PERSONAL_FB_CLAVE = "Mtc-Gestion-2026-Personal-Xk9pQ7vL";
 try{
   if (typeof firebase !== "undefined"){
     firebase.initializeApp(firebaseConfig);
     dbCloud = firebase.firestore();
-    firebase.auth().signInAnonymously().catch(err => console.error("Firebase auth:", err));
+    firebase.auth().signInWithEmailAndPassword(PERSONAL_FB_CORREO, PERSONAL_FB_CLAVE)
+      .catch(err => console.error("Firebase auth (personal):", err));
     firebase.auth().onAuthStateChanged(user => {
       if (user && !nubeConectada){
         nubeConectada = true;
@@ -373,12 +378,16 @@ async function iniciarSincronizacionNube(){
   // localmente, se suben una sola vez para no perderlos (en vez de que la nube vacía los borre
   // de la pantalla).
   try{
-    const [snapExp, snapSol] = await Promise.all([
+    const [snapExp, snapSol, snapEval, snapCat] = await Promise.all([
       dbCloud.collection("expedientes").limit(1).get(),
-      dbCloud.collection("solicitudes").limit(1).get()
+      dbCloud.collection("solicitudes").limit(1).get(),
+      dbCloud.collection("evaluaciones").limit(1).get(),
+      dbCloud.collection("meta").doc("catalogo").get()
     ]);
     if (snapExp.empty && expedientes.length) await Promise.all(expedientes.map(e => dbCloud.collection("expedientes").doc(e.id).set(e)));
     if (snapSol.empty && solicitudes.length) await Promise.all(solicitudes.map(s => dbCloud.collection("solicitudes").doc(s.id).set(s)));
+    if (snapEval.empty && evaluaciones.length) await Promise.all(evaluaciones.map(ev => dbCloud.collection("evaluaciones").doc(ev.id).set(ev)));
+    if (!snapCat.exists && catalogo) await dbCloud.collection("meta").doc("catalogo").set({ datos: catalogo });
   }catch(err){ console.error("Migración inicial a la nube:", err); }
 
   dbCloud.collection("expedientes").onSnapshot(snap => {
@@ -392,11 +401,27 @@ async function iniciarSincronizacionNube(){
     guarda("mtc_solicitudes", solicitudes);
     if (sesion) irVista(vistaActual);
   }, err => console.error("Firestore solicitudes:", err));
+
+  dbCloud.collection("evaluaciones").onSnapshot(snap => {
+    evaluaciones = snap.docs.map(d => d.data()).sort((a,b) => (b.creadoMs||0) - (a.creadoMs||0));
+    guarda("mtc_evaluaciones", evaluaciones);
+    if (sesion) irVista(vistaActual);
+  }, err => console.error("Firestore evaluaciones:", err));
+
+  dbCloud.collection("meta").doc("catalogo").onSnapshot(snap => {
+    if (snap.exists && snap.data().datos){
+      catalogo = snap.data().datos;
+      guarda("mtc_catalogo_v2", catalogo);
+      if (sesion) irVista(vistaActual);
+    }
+  }, err => console.error("Firestore catálogo:", err));
 }
 function guardarExpedienteNube(e){ if (nubeConectada && e) dbCloud.collection("expedientes").doc(e.id).set(e).catch(err => console.error("Guardar expediente en la nube:", err)); }
 function eliminarExpedienteNube(id){ if (nubeConectada) dbCloud.collection("expedientes").doc(id).delete().catch(err => console.error("Eliminar expediente en la nube:", err)); }
 function guardarSolicitudNube(s){ if (nubeConectada && s) dbCloud.collection("solicitudes").doc(s.id).set(s).catch(err => console.error("Guardar solicitud en la nube:", err)); }
 function eliminarSolicitudNube(id){ if (nubeConectada) dbCloud.collection("solicitudes").doc(id).delete().catch(err => console.error("Eliminar solicitud en la nube:", err)); }
+function guardarEvaluacionNube(ev){ if (nubeConectada && ev) dbCloud.collection("evaluaciones").doc(ev.id).set(ev).catch(err => console.error("Guardar evaluación en la nube:", err)); }
+function guardarCatalogoNube(){ if (nubeConectada) dbCloud.collection("meta").doc("catalogo").set({ datos: catalogo }).catch(err => console.error("Guardar catálogo en la nube:", err)); }
 const ahora = () => new Date().toLocaleString("es-PE", {day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 function abrirVentana(){
   const w = window.open("", "_blank");
@@ -1824,7 +1849,6 @@ function plantillaBase(titulo, subtitulo){
       <div class="datos"><div class="grid-campos">
         <div class="campo"><span class="et">Cliente</span><span class="val"><b>{{nombre_completo}}</b></span></div>
         <div class="campo"><span class="et">DNI</span><span class="val">{{dni}}</span></div>
-        <div class="campo"><span class="et">Teléfono</span><span class="val">{{telefono}}</span></div>
         <div class="campo"><span class="et">Dirección</span><span class="val">{{direccion}}</span></div>
         <div class="campo"><span class="et">Tipo de trámite</span><span class="val">{{tipo_tramite}}</span></div>
         <div class="campo"><span class="et">Sede</span><span class="val">{{sede}}</span></div>
@@ -1917,6 +1941,7 @@ function generarDocumento(e){
   // a "Administrador de plantillas": así el PDF, la vista previa y la impresión usan siempre
   // la versión correcta sin depender de que el usuario haya visitado esa pantalla antes.
   plantillas[tipoPlantilla].html = migrarLogoEnPlantilla(plantillas[tipoPlantilla].html);
+  plantillas[tipoPlantilla].html = quitarTelefonoEnPlantilla(plantillas[tipoPlantilla].html);
   guarda("mtc_plantillas", plantillas);
   let html = plantillas[tipoPlantilla].html;
   Object.entries(vals).forEach(([k,v]) => { html = html.split(k).join(v); });
@@ -2048,6 +2073,12 @@ function migrarLogoEnPlantilla(html){
     }
     return tmp.innerHTML;
   }catch(_e){ return html; }
+}
+// Las plantillas guardadas traían un campo "Teléfono" que esta gestoría nunca llena; se quita
+// también de las que ya estaban guardadas (no solo del diseño por defecto de las nuevas).
+function quitarTelefonoEnPlantilla(html){
+  if (!html) return html;
+  return html.replace('<div class="campo"><span class="et">Teléfono</span><span class="val">{{telefono}}</span></div>', "");
 }
 function subirLogoEncabezado(inputEl){
   const f = inputEl.files[0];
@@ -2347,6 +2378,7 @@ async function registrarEvaluacion(auto){
   };
   evaluaciones.unshift(ev);
   guarda("mtc_evaluaciones", evaluaciones);
+  guardarEvaluacionNube(ev);
   log(`Registró evaluación${auto ? " (automática)" : ""} · DNI ${dni} (${ev.resultado === "apto" ? "APTO" : "NO APTO"}) · Categorías: ${categorias.join(", ")}`);
   if (!auto) await ocultarCargando();
   msg.style.color = "var(--verde)"; msg.textContent = auto ? "Registrado automáticamente ✓" : "Resultado guardado ✓";
@@ -3223,6 +3255,7 @@ function restaurarCatalogo(){
   catalogo = {};
   CATALOGO_OFICIAL.forEach(x => { catalogo[x.c] = { d:x.d, n:x.n, m:x.m, dsc:x.dsc, s:x.s, p:x.p, mp:x.mp, sol:x.sol }; });
   guarda("mtc_catalogo_v2", catalogo);
+  guardarCatalogoNube();
   log("Restauró el catálogo oficial de infracciones");
   pintarPapeletas();
 }
@@ -3231,6 +3264,7 @@ function editCat(c, campo, val){
   else if (campo === "m") catalogo[c].m = parseFloat(val)||0;
   else catalogo[c][campo] = val;
   guarda("mtc_catalogo_v2", catalogo);
+  guardarCatalogoNube();
 }
 
 // --- Automatización del módulo ---
@@ -3581,7 +3615,7 @@ function importarBackup(inp){
       auditoria = d.auditoria || []; notifs = d.notifs || []; config = d.config || config;
       if (d.plantillas) { plantillas = d.plantillas; guarda("mtc_plantillas", plantillas); }
       if (d.solicitudes) { solicitudes = d.solicitudes; guarda("mtc_solicitudes", solicitudes); solicitudes.forEach(guardarSolicitudNube); }
-      if (d.catalogo) { catalogo = d.catalogo; guarda("mtc_catalogo_v2", catalogo); }
+      if (d.catalogo) { catalogo = d.catalogo; guarda("mtc_catalogo_v2", catalogo); guardarCatalogoNube(); }
       if (d.cfgPap) { cfgPap = d.cfgPap; guarda("mtc_cfgpap", cfgPap); }
       guarda("mtc_expedientes", expedientes); guarda("mtc_usuarios", usuarios);
       guarda("mtc_auditoria", auditoria); guarda("mtc_notifs", notifs); guarda("mtc_config", config);
