@@ -146,32 +146,15 @@ try{
   if (typeof firebase !== "undefined"){
     firebase.initializeApp(firebaseConfig);
     dbCloud = firebase.firestore();
-    firebase.auth().signInAnonymously().catch(err => console.error("Firebase auth:", err));
   }
 }catch(_e){ /* sin nube: se intenta el archivo estático como respaldo */ }
 
-function moldearTramitePublico(e){
-  return {
-    dni: e.dni, nombres: e.nombres, apellidos: e.apellidos,
-    tipo: e.tipo, estado: e.estado,
-    fechaRegistro: e.fechaRegistro,
-    actualizado: (e.historial && e.historial[0] ? e.historial[0].fecha : e.fechaRegistro),
-    codigo: (e.id || "").replace("E","EXP-"),
-    categoria: e.categoria || "", aptitud: e.aptitud || "", tipoLicencia: e.tipoLicencia || "",
-    restricciones: e.restricciones || "", centroEmision: e.centroEmision || "",
-    numeroLicencia: e.numeroLicencia || "", fechaExpedicion: e.fechaExpedicion || "",
-    vigenteHasta: e.vigenteHasta || "",
-    direccion: e.direccion || "", foto: e.foto || null,
-    observaciones: e.observaciones || "", sede: e.sede || "", fechaFin: e.fechaFin || "",
-    responsable: e.responsable || "",
-    docs: (e.docs || []).map(d => ({ nombre: d.nombre, data: d.data }))
-  };
-}
 async function tramitesDe(dni){
   if (dbCloud){
     try{
-      const snap = await dbCloud.collection("expedientes").where("dni","==",dni).get();
-      return snap.docs.map(d => moldearTramitePublico(d.data()));
+      const snap = await dbCloud.collection("publico").doc(dni).collection("registros").get();
+      return snap.docs.map(d => d.data()).filter(r => r.tipo === "tramite").map(r => r.datos)
+        .sort((a,b) => String(b.codigo || "").localeCompare(String(a.codigo || "")));
     }catch(err){ console.error("Firestore (constancia):", err); /* sigue al respaldo de abajo */ }
   }
   try{

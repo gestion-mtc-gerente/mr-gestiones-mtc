@@ -418,6 +418,7 @@ h1.titulo-vista::after{content:""; display:block; width:44px; height:4px; border
       <div class="login-perfil-nombre" id="loginAvatarNombre"></div>
       <div class="uc-cargo" id="loginAvatarCargo"></div>
     </div>
+    <div id="cajaLogin">
     <label>USUARIO</label>
     <div class="campo-ojito">
       <input id="logUser" type="password" placeholder="Nombre de usuario" autocomplete="username" oninput="actualizarAvatarLogin()">
@@ -433,6 +434,16 @@ h1.titulo-vista::after{content:""; display:block; width:44px; height:4px; border
       <button class="link" onclick="recuperarPass()">¿Olvidaste tu contraseña?</button>
     </div>
     <button class="btn" style="width:100%" onclick="iniciarSesion()">INICIAR SESIÓN</button>
+    </div>
+    <div id="cajaPrimera" class="oculto">
+      <p style="font-size:12.5px;color:var(--gris);margin-bottom:12px;text-align:center"><b>Primera vez:</b> crea tu cuenta principal. Con ella controlas todo el sistema y a tus trabajadores.</p>
+      <label>TU NOMBRE</label><input id="priNombre" autocomplete="name">
+      <label>CARGO</label><input id="priCargo">
+      <label>USUARIO</label><input id="priUser" autocomplete="username">
+      <label>CONTRASEÑA (mínimo 8 caracteres)</label><input id="priPass" type="password" autocomplete="new-password">
+      <label>REPITE LA CONTRASEÑA</label><input id="priPass2" type="password" autocomplete="new-password">
+      <button class="btn" style="width:100%;margin-top:6px" onclick="crearPrincipal()">CREAR MI CUENTA PRINCIPAL</button>
+    </div>
     <p class="msg-login" id="msgLogin"></p>
   </div>
 </div>
@@ -480,7 +491,8 @@ h1.titulo-vista::after{content:""; display:block; width:44px; height:4px; border
     <div class="topbar">
       <button id="btnMenu" onclick="document.getElementById('menuLateral').classList.toggle('abierto')">☰</button>
       <div class="buscador"><input id="buscadorGlobal" placeholder="Buscar por DNI, nombre o apellido…" oninput="busquedaGlobal()"></div>
-      <div class="usuario-chip" onclick="abrirEditarUsuario(usuarios.findIndex(u=>u.user===sesion.user))" title="Editar mi perfil">
+      <select id="verDueno" class="oculto" style="width:auto;max-width:240px" onchange="cambiarFiltro(this.value)" title="Registros que se muestran"></select>
+      <div class="usuario-chip" onclick="abrirEditarUsuario(usuarios.findIndex(u=>u.uid===sesion.uid))" title="Editar mi perfil">
         <span class="uc-avatar" id="chipAvatar">👤</span>
         <span class="uc-textos"><span id="chipNombre"></span><span class="uc-cargo" id="chipCargo"></span></span>
         <span class="rol" id="chipRol"></span></div>
@@ -512,13 +524,16 @@ const EMPRESA = {
 // ---------- Utilidades ----------
 const $ = id => document.getElementById(id);
 const lee = (k, def) => { try { return JSON.parse(localStorage.getItem(k)) ?? def; } catch(e){ return def; } };
-const guarda = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+// Ajustes compartidos: lo que el administrador cambia llega a todos los equipos.
+const CAMPOS_AJUSTES = { logo:"mtc_logo", hmTitulo:"mtc_hm_titulo", hmSubtitulo:"mtc_hm_subtitulo",
+  config:"mtc_config", cfgPap:"mtc_cfgpap", plantillas:"mtc_plantillas", pie:"mtc_pie" };
+let ajustesListos = false, firmasListas = false;
+const guarda = (k, v) => { localStorage.setItem(k, JSON.stringify(v)); avisarCambioAjustes(k); };
 const escapa = t => String(t ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-// ---------- Firebase: sincronización de trámites y solicitudes entre dispositivos ----------
-// Si Firebase no carga (sin internet, bloqueado, etc.) el sistema sigue funcionando normal,
-// solo con los datos guardados en este dispositivo — nubeConectada queda en false y las
-// funciones de sincronización no hacen nada.
+// ---------- Firebase: cuentas y sincronización entre dispositivos ----------
+// Cada persona entra con su propia cuenta. Las reglas de Firestore (no esta página) son las
+// que impiden que un trabajador lea o cambie registros de otro.
 const firebaseConfig = {
   apiKey: "AIzaSyA6VtplK2yA0jarjEcLz1Y4PT7EsA_zaDA",
   authDomain: "mtc-gestion-666ee.firebaseapp.com",
@@ -528,86 +543,286 @@ const firebaseConfig = {
   appId: "1:362415983939:web:34a7b127a00c190d1e73f6"
 };
 let nubeConectada = false;
-let dbCloud = null;
-// Cuenta de Firebase exclusiva para que ESTE sistema (el del personal) pueda escribir en la
-// nube. La página pública de consulta usa una sesión anónima aparte, que las reglas de
-// Firestore solo dejan LEER — así un visitante cualquiera nunca puede alterar tus trámites
-// reales, aunque abra la consola del navegador.
-const PERSONAL_FB_CORREO = "personal@mrgestiones-mtc.app";
-const PERSONAL_FB_CLAVE = "Mtc-Gestion-2026-Personal-Xk9pQ7vL";
+let dbCloud = null, authNube = null;
 try{
   if (typeof firebase !== "undefined"){
-    firebase.initializeApp(firebaseConfig);
-    dbCloud = firebase.firestore();
-    firebase.auth().signInWithEmailAndPassword(PERSONAL_FB_CORREO, PERSONAL_FB_CLAVE)
-      .catch(err => console.error("Firebase auth (personal):", err));
-    firebase.auth().onAuthStateChanged(user => {
-      if (user && !nubeConectada){
-        nubeConectada = true;
-        iniciarSincronizacionNube();
-      }
-    });
+    // Nombre propio: así la consulta pública abierta en el mismo navegador no cierra la sesión.
+    const appNube = firebase.initializeApp(firebaseConfig, "sistema");
+    authNube = appNube.auth();
+    dbCloud = appNube.firestore();
   }
-}catch(_e){ /* sin nube, el sistema sigue funcionando solo en este dispositivo */ }
+}catch(err){ console.error("Firebase:", err); }
 
-async function iniciarSincronizacionNube(){
-  // Primera vez: si la nube está vacía pero este dispositivo ya tiene datos guardados
-  // localmente, se suben una sola vez para no perderlos (en vez de que la nube vacía los borre
-  // de la pantalla).
-  try{
-    const [snapExp, snapSol, snapEval, snapCat] = await Promise.all([
-      dbCloud.collection("expedientes").limit(1).get(),
-      dbCloud.collection("solicitudes").limit(1).get(),
-      dbCloud.collection("evaluaciones").limit(1).get(),
-      dbCloud.collection("meta").doc("catalogo").get()
-    ]);
-    if (snapExp.empty && expedientes.length) await Promise.all(expedientes.map(e => dbCloud.collection("expedientes").doc(e.id).set(e)));
-    if (snapSol.empty && solicitudes.length) await Promise.all(solicitudes.map(s => dbCloud.collection("solicitudes").doc(s.id).set(s)));
-    if (snapEval.empty && evaluaciones.length) await Promise.all(evaluaciones.map(ev => dbCloud.collection("evaluaciones").doc(ev.id).set(ev)));
-    if (!snapCat.exists && catalogo) await dbCloud.collection("meta").doc("catalogo").set({ datos: catalogo });
-  }catch(err){ console.error("Migración inicial a la nube:", err); }
+const ID_PRINCIPAL = "principal";
+const COLECCIONES = { expedientes:"registroMs", solicitudes:"creadoMs", evaluaciones:"creadoMs" };
+let crudo = { expedientes:[], solicitudes:[], evaluaciones:[] }; // todo lo que esta cuenta puede leer
+let filtroDueno = ID_PRINCIPAL;  // qué registros mira el administrador
+let escuchas = [];
+const espejos = new Map();       // id de registro → DNI publicado en la consulta
+let ultimoAjustes = "", ultimasFirmas = "", esperaAjustes = null, esperaFirmas = null;
 
-  dbCloud.collection("expedientes").onSnapshot(snap => {
-    expedientes = snap.docs.map(d => d.data()).sort((a,b) => (b.registroMs||0) - (a.registroMs||0));
-    guarda("mtc_expedientes", expedientes);
-    if (sesion) irVista(vistaActual);
-  }, err => console.error("Firestore expedientes:", err));
+const esAdmin = () => !!sesion && sesion.rol === "admin";
+const duenoDe = r => r.dueno || ID_PRINCIPAL;
+function visibles(lista){
+  if (!sesion) return [];
+  if (!esAdmin()) return lista.filter(r => r.dueno === sesion.mid);
+  return filtroDueno === "todos" ? lista : lista.filter(r => duenoDe(r) === filtroDueno);
+}
+function aplicarFiltro(){
+  const antes = JSON.stringify([expedientes, solicitudes, evaluaciones]);
+  expedientes  = visibles(crudo.expedientes);
+  solicitudes  = visibles(crudo.solicitudes);
+  evaluaciones = visibles(crudo.evaluaciones);
+  guarda("mtc_expedientes", expedientes);
+  guarda("mtc_solicitudes", solicitudes);
+  guarda("mtc_evaluaciones", evaluaciones);
+  if (sesion && JSON.stringify([expedientes, solicitudes, evaluaciones]) !== antes) irVista(vistaActual);
+}
+function cambiarFiltro(valor){
+  filtroDueno = valor;
+  pintarSelectorDueno();
+  aplicarFiltro();
+}
+function pintarSelectorDueno(){
+  const sel = $("verDueno");
+  if (!sel) return;
+  const equipo = usuarios.filter(u => u.mid !== ID_PRINCIPAL);
+  const conocidos = new Set([ID_PRINCIPAL, ...equipo.map(u => u.mid)]);
+  const sueltos = [...new Set(Object.values(crudo).flat().map(duenoDe))].filter(m => !conocidos.has(m));
+  sel.classList.toggle("oculto", !esAdmin() || (!equipo.length && !sueltos.length));
+  sel.innerHTML = `<option value="${ID_PRINCIPAL}">Mis registros</option><option value="todos">Todos los registros</option>`
+    + equipo.map(u => `<option value="${escapa(u.mid)}">Registros de ${escapa(u.nombre)}</option>`).join("")
+    + sueltos.map((m,i) => `<option value="${escapa(m)}">Trabajador eliminado ${i+1}</option>`).join("");
+  sel.value = filtroDueno;
+}
 
-  dbCloud.collection("solicitudes").onSnapshot(snap => {
-    solicitudes = snap.docs.map(d => d.data()).sort((a,b) => (b.creadoMs||0) - (a.creadoMs||0));
-    guarda("mtc_solicitudes", solicitudes);
-    if (sesion) irVista(vistaActual);
-  }, err => console.error("Firestore solicitudes:", err));
+function avisoNube(que, err){
+  console.error(que + ":", err);
+  if (err && err.code === "permission-denied") alert("No se pudo guardar en la nube: tu cuenta no tiene permiso. Vuelve a iniciar sesión.");
+}
 
-  dbCloud.collection("evaluaciones").onSnapshot(snap => {
-    evaluaciones = snap.docs.map(d => d.data()).sort((a,b) => (b.creadoMs||0) - (a.creadoMs||0));
-    guarda("mtc_evaluaciones", evaluaciones);
-    if (sesion) irVista(vistaActual);
-  }, err => console.error("Firestore evaluaciones:", err));
+// --- Consulta por DNI: copia recortada de cada registro, que solo se lee sabiendo el DNI ---
+// Mismo recorte de campos que "Publicar portal" en el sistema interno: no expone correo,
+// historial interno, ni los archivos de requisitos (exámenes/COFIPRO).
+function moldearTramitePublico(e){
+  return {
+    dni: e.dni, nombres: e.nombres, apellidos: e.apellidos,
+    tipo: e.tipo, estado: e.estado,
+    fechaRegistro: e.fechaRegistro,
+    actualizado: (e.historial && e.historial[0] ? e.historial[0].fecha : e.fechaRegistro),
+    codigo: (e.id || "").replace("E","EXP-"),
+    categoria: e.categoria || "", aptitud: e.aptitud || "", tipoLicencia: e.tipoLicencia || "",
+    restricciones: e.restricciones || "", centroEmision: e.centroEmision || "",
+    numeroLicencia: e.numeroLicencia || "", fechaExpedicion: e.fechaExpedicion || "",
+    vigenteHasta: e.vigenteHasta || "",
+    direccion: e.direccion || "", foto: e.foto || null,
+    observaciones: e.observaciones || "", sede: e.sede || "", fechaFin: e.fechaFin || "",
+    responsable: e.responsable || "",
+    docs: (e.docs || []).map(d => ({ nombre: d.nombre, data: d.data }))
+  };
+}
+function moldearSolicitudPublica(s){
+  return {
+    dni: s.dni, estado: s.estado,
+    fechaRegistro: s.fechaRegistro, actualizado: s.actualizado,
+    papeletas: (s.papeletas || []).map(p => {
+      const c = catalogo[p.codigo] || {};
+      return { codigo: p.codigo, nivel: c.n || "", puntos: c.p || 0, multa: c.m || 0 };
+    }),
+    consultaOficial: s.consultaOficial || null,
+    pagoConfirmadoMs: s.pagoConfirmadoMs || null,
+    numeroOperacion: s.numeroOperacion || null,
+    montoPagado: s.montoPagado || null,
+    valorDocumento: s.valorDocumento || null,
+    fechaAprobacion: s.fechaAprobacion || null
+  };
+}
+function moldearEvaluacionPublica(ev){
+  return { dni: ev.dni, nombres: ev.nombres, apellidos: ev.apellidos, resultado: ev.resultado, categorias: ev.categorias || [], fecha: ev.fecha };
+}
+const espejoRef = (dni, id) => dbCloud.collection("publico").doc(dni).collection("registros").doc(id);
+function borrarEspejo(dni, id){
+  if (/^\d{8}$/.test(dni || "")) espejoRef(dni, id).delete().catch(err => console.error("Quitar de la consulta:", err));
+  espejos.delete(id);
+}
+function publicarEspejo(tipo, r){
+  const previo = espejos.get(r.id);
+  if (previo && previo !== r.dni) borrarEspejo(previo, r.id);
+  if (!/^\d{8}$/.test(r.dni || "")) return Promise.resolve();
+  espejos.set(r.id, r.dni);
+  const datos = tipo === "tramite" ? moldearTramitePublico(r) : tipo === "papeleta" ? moldearSolicitudPublica(r) : moldearEvaluacionPublica(r);
+  return espejoRef(r.dni, r.id).set(JSON.parse(JSON.stringify({ tipo, dueno: duenoDe(r), datos })))
+    .catch(err => console.error("Publicar en la consulta:", err));
+}
+
+function guardarRegistroNube(col, tipo, r){
+  if (!nubeConectada || !r) return;
+  const nuevo = !r.dueno;
+  if (nuevo) r.dueno = esAdmin() ? ID_PRINCIPAL : sesion.mid;
+  publicarEspejo(tipo, r);
+  dbCloud.collection(col).doc(r.id).set(r).catch(err => avisoNube("Guardar " + col, err));
+  // Si el administrador registra algo mientras mira lo de otra persona, vuelve a "Mis registros".
+  if (nuevo && esAdmin() && filtroDueno !== "todos" && filtroDueno !== r.dueno) cambiarFiltro(r.dueno);
+}
+function eliminarRegistroNube(col, id){
+  if (!nubeConectada) return;
+  const dni = espejos.get(id);
+  if (dni) borrarEspejo(dni, id);
+  dbCloud.collection(col).doc(id).delete().catch(err => avisoNube("Eliminar " + col, err));
+}
+function guardarExpedienteNube(e){ guardarRegistroNube("expedientes", "tramite", e); }
+function eliminarExpedienteNube(id){ eliminarRegistroNube("expedientes", id); }
+function guardarSolicitudNube(s){ guardarRegistroNube("solicitudes", "papeleta", s); }
+function eliminarSolicitudNube(id){ eliminarRegistroNube("solicitudes", id); }
+function guardarEvaluacionNube(ev){ guardarRegistroNube("evaluaciones", "evaluacion", ev); }
+function guardarCatalogoNube(){ if (nubeConectada && esAdmin()) dbCloud.collection("meta").doc("catalogo").set({ datos: catalogo }).catch(err => console.error("Guardar catálogo en la nube:", err)); }
+
+// --- Ajustes compartidos y firmas ---
+const huella = o => JSON.stringify(Object.keys(o).sort().map(k => [k, o[k]]));
+function ajustesLocales(){
+  const o = {};
+  Object.entries(CAMPOS_AJUSTES).forEach(([campo, clave]) => { const v = localStorage.getItem(clave); if (v !== null) o[campo] = v; });
+  return o;
+}
+function avisarCambioAjustes(clave){
+  if (!ajustesListos && !firmasListas) return;
+  if (!nubeConectada || !esAdmin()) return;
+  if (clave === "mtc_firmas"){ clearTimeout(esperaFirmas); esperaFirmas = setTimeout(publicarFirmas, 300); }
+  else if (Object.values(CAMPOS_AJUSTES).includes(clave)){ clearTimeout(esperaAjustes); esperaAjustes = setTimeout(publicarAjustes, 600); }
+}
+function publicarAjustes(){
+  if (!nubeConectada || !esAdmin()) return;
+  const valores = ajustesLocales(), h = huella(valores);
+  if (h === ultimoAjustes) return;
+  ultimoAjustes = h;
+  dbCloud.collection("meta").doc("ajustes").set({ valores }).catch(err => {
+    console.error("Compartir ajustes:", err);
+    alert("Los ajustes se guardaron en este equipo, pero no se pudieron compartir con los demás. Si subiste un logo muy pesado, usa uno más liviano.");
+  });
+}
+function aplicarAjustes(valores){
+  Object.entries(CAMPOS_AJUSTES).forEach(([campo, clave]) => { if (typeof valores[campo] === "string") localStorage.setItem(clave, valores[campo]); });
+  logoEmpresa = lee("mtc_logo", null);
+  hmTitulo = lee("mtc_hm_titulo", TITULO_HEADER_DEFECTO);
+  hmSubtitulo = lee("mtc_hm_subtitulo", SUBTITULO_HEADER_DEFECTO);
+  config = lee("mtc_config", config);
+  if (!config.categoriasActivas) config.categoriasActivas = {};
+  CATEGORIAS_LICENCIA.forEach(c => { if (config.categoriasActivas[c] === undefined) config.categoriasActivas[c] = true; });
+  cfgPap = lee("mtc_cfgpap", cfgPap);
+  plantillas = lee("mtc_plantillas", plantillas);
+  pieDoc = { ...PIE_DEFECTO, ...(lee("mtc_pie", null) || {}) };
+  pintarLogoHeaderTop();
+  pintarSubtituloHeader();
+}
+function publicarFirmas(){
+  if (!nubeConectada || !esAdmin()) return;
+  const texto = JSON.stringify(firmas);
+  if (texto === ultimasFirmas) return;
+  ultimasFirmas = texto;
+  dbCloud.collection("privado").doc("firmas").set({ texto }).catch(err => console.error("Guardar firmas en la nube:", err));
+}
+
+// --- Puesta al día de los registros que existían antes de las cuentas (solo el administrador) ---
+async function migrarRegistros(){
+  const marca = dbCloud.collection("meta").doc("migracion");
+  if ((await marca.get()).exists) return;
+  const locales = { expedientes, solicitudes, evaluaciones };
+  const tipos = { expedientes:"tramite", solicitudes:"papeleta", evaluaciones:"evaluacion" };
+  const cat = await dbCloud.collection("meta").doc("catalogo").get();
+  if (cat.exists && cat.data().datos) catalogo = cat.data().datos;
+  else await dbCloud.collection("meta").doc("catalogo").set({ datos: catalogo });
+  for (const col of Object.keys(COLECCIONES)){
+    const snap = await dbCloud.collection(col).get();
+    // Si la nube está vacía pero este equipo tiene datos, se suben para no perderlos.
+    const lista = snap.empty ? locales[col] : snap.docs.map(d => d.data());
+    for (const r of lista){
+      const cambia = snap.empty || !r.dueno;
+      if (!r.dueno) r.dueno = ID_PRINCIPAL;
+      if (cambia) await dbCloud.collection(col).doc(r.id).set(r);
+      await publicarEspejo(tipos[col], r);
+    }
+  }
+  await marca.set({ hecha: Date.now() });
+}
+
+function iniciarSincronizacionNube(){
+  const doc = (c, d) => dbCloud.collection(c).doc(d);
+  Object.entries(COLECCIONES).forEach(([col, campo]) => {
+    const consulta = esAdmin() ? dbCloud.collection(col) : dbCloud.collection(col).where("dueno", "==", sesion.mid);
+    escuchas.push(consulta.onSnapshot(snap => {
+      crudo[col] = snap.docs.map(d => d.data()).sort((a,b) => (b[campo]||0) - (a[campo]||0));
+      crudo[col].forEach(r => { if (!espejos.has(r.id)) espejos.set(r.id, r.dni); });
+      aplicarFiltro();
+      pintarSelectorDueno();
+    }, err => console.error("Firestore " + col + ":", err)));
+  });
+
+  // Cambios en la propia cuenta: si el administrador la quita o la cambia, se cierra sola.
+  escuchas.push(doc("miembros", sesion.uid).onSnapshot(snap => {
+    if (!sesion) return;
+    if (!snap.exists){
+      cerrarSesion();
+      return alert("Tu acceso fue cambiado o eliminado. Pide tus nuevos datos al administrador.");
+    }
+    sesion = perfilSesion(sesion.uid, snap.data());
+    if (!esAdmin()) usuarios = [sesion];
+    pintarPerfil();
+  }, err => console.error("Firestore perfil:", err)));
+
+  if (esAdmin()){
+    escuchas.push(dbCloud.collection("miembros").onSnapshot(snap => {
+      const antes = JSON.stringify(usuarios);
+      usuarios = snap.docs.map(d => perfilSesion(d.id, d.data()))
+        .sort((a,b) => (a.rol === "admin" ? 0 : 1) - (b.rol === "admin" ? 0 : 1) || a.nombre.localeCompare(b.nombre));
+      pintarSelectorDueno();
+      if (JSON.stringify(usuarios) !== antes && vistaActual === "usuarios") irVista("usuarios");
+    }, err => console.error("Firestore equipo:", err)));
+
+    escuchas.push(doc("privado", "firmas").onSnapshot(snap => {
+      if (snap.exists && snap.data().texto){
+        ultimasFirmas = snap.data().texto;
+        firmas = JSON.parse(ultimasFirmas);
+        localStorage.setItem("mtc_firmas", ultimasFirmas);
+        firmasListas = true;
+      } else {
+        firmasListas = true;
+        if (firmas.some(f => f.img || f.nombre || f.cargo)) publicarFirmas();
+      }
+    }, err => console.error("Firestore firmas:", err)));
+  }
+
+  escuchas.push(doc("meta", "ajustes").onSnapshot(snap => {
+    if (snap.exists && snap.data().valores){
+      const h = huella(snap.data().valores);
+      ajustesListos = true;
+      if (h === ultimoAjustes) return;
+      ultimoAjustes = h;
+      aplicarAjustes(snap.data().valores);
+      if (sesion && !["config","plantillas"].includes(vistaActual) && !$("zonaModal").innerHTML.trim()) irVista(vistaActual);
+    } else {
+      ajustesListos = true;
+      publicarAjustes();
+    }
+  }, err => console.error("Firestore ajustes:", err)));
 
   // "Cerrar sesión en todos los dispositivos": cualquier sesión iniciada antes de esa marca se cierra sola.
-  dbCloud.collection("meta").doc("sesiones").onSnapshot(snap => {
+  escuchas.push(doc("meta", "sesiones").onSnapshot(snap => {
     const corte = snap.exists ? (snap.data().cerrarDesde || 0) : 0;
     if (sesion && corte > sesionInicioMs){
       cerrarSesion();
       alert("Se cerró tu sesión porque se pidió cerrar sesión en todos los dispositivos. Vuelve a iniciar sesión.");
     }
-  }, err => console.error("Firestore sesiones:", err));
+  }, err => console.error("Firestore sesiones:", err)));
 
-  dbCloud.collection("meta").doc("catalogo").onSnapshot(snap => {
+  escuchas.push(doc("meta", "catalogo").onSnapshot(snap => {
     if (snap.exists && snap.data().datos){
+      const antes = JSON.stringify(catalogo);
       catalogo = snap.data().datos;
       guarda("mtc_catalogo_v2", catalogo);
-      if (sesion) irVista(vistaActual);
+      if (sesion && JSON.stringify(catalogo) !== antes) irVista(vistaActual);
     }
-  }, err => console.error("Firestore catálogo:", err));
+  }, err => console.error("Firestore catálogo:", err)));
 }
-function guardarExpedienteNube(e){ if (nubeConectada && e) dbCloud.collection("expedientes").doc(e.id).set(e).catch(err => console.error("Guardar expediente en la nube:", err)); }
-function eliminarExpedienteNube(id){ if (nubeConectada) dbCloud.collection("expedientes").doc(id).delete().catch(err => console.error("Eliminar expediente en la nube:", err)); }
-function guardarSolicitudNube(s){ if (nubeConectada && s) dbCloud.collection("solicitudes").doc(s.id).set(s).catch(err => console.error("Guardar solicitud en la nube:", err)); }
-function eliminarSolicitudNube(id){ if (nubeConectada) dbCloud.collection("solicitudes").doc(id).delete().catch(err => console.error("Eliminar solicitud en la nube:", err)); }
-function guardarEvaluacionNube(ev){ if (nubeConectada && ev) dbCloud.collection("evaluaciones").doc(ev.id).set(ev).catch(err => console.error("Guardar evaluación en la nube:", err)); }
-function guardarCatalogoNube(){ if (nubeConectada) dbCloud.collection("meta").doc("catalogo").set({ datos: catalogo }).catch(err => console.error("Guardar catálogo en la nube:", err)); }
 const ahora = () => new Date().toLocaleString("es-PE", {day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 function abrirVentana(){
   const w = window.open("", "_blank");
@@ -624,7 +839,7 @@ async function hash(txt){
 }
 
 // ---------- Estado global ----------
-let usuarios     = lee("mtc_usuarios", []);
+let usuarios     = []; // cuentas del equipo (vienen de la nube; el trabajador solo ve la suya)
 let expedientes  = lee("mtc_expedientes", []);
 let auditoria    = lee("mtc_auditoria", []);
 let notifs       = lee("mtc_notifs", []);
@@ -673,20 +888,26 @@ function pintarIconoOjo(btn, visible){
   btn.innerHTML = visible ? ICONO_OJO_ABIERTO : ICONO_OJO_CERRADO;
 }
 
-// ---------- Inicialización: crea admin por defecto ----------
-(async function init(){
-  if (usuarios.length === 0){
-    usuarios.push({ user:"admin", pass: await hash("admin123"), rol:"admin", nombre:"Administrador", cargo:"Gerente Administrativo" });
-    guarda("mtc_usuarios", usuarios);
-  }
-  const rec = lee("mtc_sesion", null);
-  if (rec) entrar(rec.user, rec.desde || 0);
+// ---------- Inicialización ----------
+(function init(){
   pintarIconoOjo($("ojoLogUser"), false);
   pintarIconoOjo($("ojoLogPass"), false);
   pintarLogoHeaderTop();
   pintarSubtituloHeader();
   setTimeout(() => { motorAutomatico(); motorPapeletas(); }, 0);
   setInterval(() => { motorAutomatico(); motorPapeletas(); }, 60000);
+  if (!authNube) return mensajeAcceso("Se necesita internet para iniciar sesión. Revisa tu conexión y recarga la página.");
+  authNube.onAuthStateChanged(async user => {
+    if (accesoEnCurso) return;
+    // Si en otra pestaña se cerró la sesión o entró otra persona, esta se reinicia.
+    if (sesion){ if (!user || user.uid !== sesion.uid) location.reload(); return; }
+    if (!user) return;
+    accesoEnCurso = true;
+    try { await entrarConCuenta(user); }
+    catch(err){ mensajeAcceso(textoError(err)); }
+    finally { accesoEnCurso = false; }
+  });
+  revisarPrimeraVez();
 })();
 
 // ---------- Auditoría ----------
@@ -710,39 +931,164 @@ function pintarBadge(){
 }
 
 // ---------- Login ----------
+let accesoEnCurso = false;
+const claveUsuario = u => encodeURIComponent(u.trim().toLowerCase()).replace(/\./g, "%2E");
+// El correo es interno (nadie lo escribe): cada cuenta de la nube necesita uno distinto.
+const correoNuevo = () => "u-" + [...crypto.getRandomValues(new Uint8Array(10))].map(b => b.toString(16).padStart(2,"0")).join("") + "@mrgestiones-mtc.app";
+const perfilSesion = (uid, p) => ({ uid, mid: p.mid, user: p.usuario, nombre: p.nombre || p.usuario, cargo: p.cargo || "", foto: p.foto || "", rol: p.rol, correo: p.correo });
+function mensajeAcceso(texto, color){
+  const m = $("msgLogin");
+  m.style.color = color || "var(--rojo)";
+  m.textContent = texto;
+}
+function textoError(err){
+  const c = (err && (err.code || err.message)) || "";
+  if (c === "permission-denied") return "Faltan las reglas de seguridad en Firebase.";
+  if (["sin-usuario","auth/wrong-password","auth/user-not-found","auth/invalid-credential","auth/invalid-login-credentials"].includes(c)) return "Usuario o contraseña incorrectos.";
+  if (c === "sin-acceso") return "Esta cuenta ya no tiene acceso al sistema.";
+  if (c === "auth/too-many-requests") return "Demasiados intentos. Espera unos minutos e intenta de nuevo.";
+  if (c === "auth/weak-password") return "La contraseña es demasiado corta.";
+  if (c === "auth/requires-recent-login") return "Por seguridad, cierra sesión, vuelve a entrar e inténtalo de nuevo.";
+  if (c === "unavailable" || c === "auth/network-request-failed") return "No hay conexión a internet. Intenta de nuevo.";
+  console.error("Acceso:", err);
+  return "No se pudo completar. Intenta de nuevo.";
+}
+function mostrarCajaAcceso(cual){
+  $("cajaLogin").classList.toggle("oculto", cual !== "login");
+  $("cajaPrimera").classList.toggle("oculto", cual !== "primera");
+  document.querySelector(".login-perfil").classList.toggle("oculto", cual === "primera");
+}
+async function revisarPrimeraVez(){
+  try{
+    const c = await dbCloud.collection("sistema").doc("config").get();
+    if (c.exists) return mostrarCajaAcceso("login");
+    // Se aprovechan el nombre, cargo y foto del perfil que ya había en este equipo.
+    const previo = lee("mtc_usuarios", []).find(u => u.rol === "admin") || {};
+    $("priNombre").value = previo.nombre && previo.nombre !== "Administrador" ? previo.nombre : "";
+    $("priCargo").value = previo.cargo || "Gerente Administrativo";
+    mostrarCajaAcceso("primera");
+    mensajeAcceso("");
+  }catch(err){ mensajeAcceso(textoError(err)); }
+}
+async function crearPrincipal(){
+  const nombre = $("priNombre").value.trim(), cargo = $("priCargo").value.trim();
+  const usuario = $("priUser").value.trim(), p1 = $("priPass").value, p2 = $("priPass2").value;
+  if (!nombre || usuario.length < 3) return mensajeAcceso("Escribe tu nombre y un usuario de al menos 3 caracteres.");
+  if (p1.length < 8) return mensajeAcceso("La contraseña principal debe tener al menos 8 caracteres.");
+  if (p1 !== p2) return mensajeAcceso("Las dos contraseñas no coinciden.");
+  accesoEnCurso = true;
+  mensajeAcceso("Creando tu cuenta principal…", "var(--gris)");
+  let cred = null;
+  try{
+    const correo = correoNuevo();
+    await authNube.setPersistence("local");
+    cred = await authNube.createUserWithEmailAndPassword(correo, p1);
+    const previo = lee("mtc_usuarios", []).find(u => u.rol === "admin") || {};
+    const foto = previo.foto ? await reducirFoto(previo.foto) : "";
+    const uid = cred.user.uid, lote = dbCloud.batch();
+    lote.set(dbCloud.collection("sistema").doc("config"), { duenoUid: uid, creado: Date.now() });
+    lote.set(dbCloud.collection("miembros").doc(uid), { mid: ID_PRINCIPAL, usuario, nombre, cargo, foto, rol:"admin", correo });
+    lote.set(dbCloud.collection("accesos").doc(claveUsuario(usuario)), { uid, correo, nombre, cargo, foto });
+    await lote.commit();
+  }catch(err){
+    if (cred) await cred.user.delete().catch(() => {});
+    accesoEnCurso = false;
+    return mensajeAcceso(textoError(err));
+  }
+  try{
+    localStorage.removeItem("mtc_usuarios");
+    localStorage.removeItem("mtc_sesion");
+    ["priPass","priPass2"].forEach(i => $(i).value = "");
+    await entrarConCuenta(cred.user);
+    mostrarCajaAcceso("login");
+    log("Creó la cuenta principal");
+  }catch(err){ mensajeAcceso(textoError(err)); }
+  finally { accesoEnCurso = false; }
+}
 async function iniciarSesion(){
   const u = $("logUser").value.trim(), p = $("logPass").value;
-  const msg = $("msgLogin");
-  const enc = usuarios.find(x => x.user === u);
-  if (!enc || enc.pass !== await hash(p)){
-    msg.style.color = "var(--rojo)";
-    msg.textContent = "Usuario o contraseña incorrectos.";
-    return;
-  }
-  const desde = Date.now();
-  if ($("logRecordar").checked) guarda("mtc_sesion", { user:u, desde });
-  entrar(u, desde);
-  log("Inició sesión");
+  if (!u || !p) return mensajeAcceso("Escribe tu usuario y tu contraseña.");
+  if (!authNube) return mensajeAcceso("Se necesita internet para iniciar sesión.");
+  if (accesoEnCurso) return mensajeAcceso("Un momento…", "var(--gris)");
+  accesoEnCurso = true;
+  mensajeAcceso("Ingresando…", "var(--gris)");
+  try{
+    const acceso = await dbCloud.collection("accesos").doc(claveUsuario(u)).get();
+    if (!acceso.exists) throw { code:"sin-usuario" };
+    await authNube.setPersistence($("logRecordar").checked ? "local" : "session");
+    const cred = await authNube.signInWithEmailAndPassword(acceso.data().correo, p);
+    await entrarConCuenta(cred.user);
+    log("Inició sesión");
+  }catch(err){ mensajeAcceso(textoError(err)); }
+  finally { accesoEnCurso = false; }
 }
-function entrar(userName, desde){
-  sesionInicioMs = desde || 0;
-  const u = usuarios.find(x => x.user === userName);
-  if (!u) return;
-  sesion = u;
+const CLAVES_REGISTROS = ["mtc_expedientes","mtc_solicitudes","mtc_evaluaciones"];
+function vaciarRegistrosLocales(){
+  expedientes = []; solicitudes = []; evaluaciones = [];
+  CLAVES_REGISTROS.forEach(k => localStorage.removeItem(k));
+}
+// En un equipo compartido, nadie debe encontrar lo que dejó otra persona.
+function prepararDatosLocales(s){
+  const previo = lee("mtc_dueno_cache", ID_PRINCIPAL);
+  if (previo !== s.mid){
+    vaciarRegistrosLocales();
+    auditoria = []; notifs = [];
+    localStorage.removeItem("mtc_auditoria"); localStorage.removeItem("mtc_notifs");
+  }
+  localStorage.setItem("mtc_dueno_cache", JSON.stringify(s.mid));
+  // Las firmas son solo del administrador.
+  firmas = s.rol === "admin" ? (lee("mtc_firmas", null) || firmasVacias()) : firmasVacias();
+}
+async function entrarConCuenta(user){
+  const snap = await dbCloud.collection("miembros").doc(user.uid).get();
+  if (!snap.exists){ await authNube.signOut(); throw { code:"sin-acceso" }; }
+  const s = perfilSesion(user.uid, snap.data());
+  mensajeAcceso("");
+  prepararDatosLocales(s);
+  sesion = s;
+  const inicio = Date.parse((user.metadata && user.metadata.lastSignInTime) || "");
+  sesionInicioMs = inicio ? inicio + 999 : Date.now();
+  nubeConectada = true;
+  filtroDueno = ID_PRINCIPAL;
+  usuarios = [s];
   $("pantallaLogin").classList.add("oculto");
   $("app").classList.remove("oculto");
-  $("chipNombre").textContent = u.nombre;
-  $("chipCargo").textContent = u.cargo || "";
-  $("chipAvatar").innerHTML = u.foto ? `<img src="${u.foto}">` : "👤";
-  $("chipRol").textContent = u.rol === "admin" ? "ADMIN" : "OPERADOR";
-  document.querySelectorAll(".soloAdmin").forEach(b => b.classList.toggle("oculto", u.rol !== "admin"));
+  $("logPass").value = "";
+  pintarPerfil();
+  pintarLogoHeaderTop();
   pintarBadge();
+  pintarSelectorDueno();
+  if (esAdmin()){
+    mostrarCargando("Preparando tu información…");
+    try { await migrarRegistros(); }
+    catch(err){ console.error("Puesta al día de registros:", err); alert("No se pudo terminar de preparar tus registros anteriores. Revisa tu internet y vuelve a iniciar sesión."); }
+    await ocultarCargando();
+    expedientes = visibles(expedientes); solicitudes = visibles(solicitudes); evaluaciones = visibles(evaluaciones);
+  } else {
+    expedientes = visibles(expedientes); solicitudes = visibles(solicitudes); evaluaciones = visibles(evaluaciones);
+  }
+  iniciarSincronizacionNube();
   irVista("dashboard");
 }
-function cerrarSesion(){
+function pintarPerfil(){
+  const u = sesion;
+  if (!u) return;
+  $("chipNombre").textContent = u.nombre;
+  $("chipCargo").textContent = u.cargo || "";
+  $("chipAvatar").innerHTML = u.foto ? `<img src="${escapa(u.foto)}">` : "👤";
+  $("chipRol").textContent = u.rol === "admin" ? "ADMIN" : "TRABAJADOR";
+  document.querySelectorAll(".soloAdmin").forEach(b => b.classList.toggle("oculto", u.rol !== "admin"));
+}
+async function cerrarSesion(){
+  if (!sesion) return;
   log("Cerró sesión");
-  localStorage.removeItem("mtc_sesion");
-  sesion = null;
+  accesoEnCurso = true;
+  escuchas.forEach(parar => parar()); escuchas = [];
+  nubeConectada = false; ajustesListos = false; firmasListas = false;
+  sesion = null; usuarios = [];
+  ultimoAjustes = ""; ultimasFirmas = "";
+  $("zonaModal").innerHTML = "";
+  $("contenido").innerHTML = "";
   $("app").classList.add("oculto");
   $("pantallaLogin").classList.remove("oculto");
   $("logPass").value = "";
@@ -750,7 +1096,19 @@ function cerrarSesion(){
   $("logPass").type = "password";
   $("logUser").type = "password";
   document.querySelectorAll(".btn-ojito").forEach(b => { b.classList.remove("activo"); pintarIconoOjo(b, false); });
+  mostrarCajaAcceso("login");
   actualizarAvatarLogin();
+  // Lo guardado en el equipo se borra solo cuando ya llegó a la nube.
+  let enviado = false;
+  try { await Promise.race([dbCloud.waitForPendingWrites().then(() => { enviado = true; }), new Promise(r => setTimeout(r, 4000))]); } catch(_e){}
+  if (!sesion){
+    if (enviado) vaciarRegistrosLocales();
+    crudo = { expedientes:[], solicitudes:[], evaluaciones:[] };
+    espejos.clear();
+    await authNube.signOut().catch(err => console.error("Cerrar sesión:", err));
+  }
+  accesoEnCurso = false;
+  mensajeAcceso("");
 }
 function alternarVerCampo(idCampo, btn){
   const input = $(idCampo);
@@ -770,25 +1128,53 @@ async function cerrarSesionesTodas(){
   }
   cerrarSesion();
 }
-function actualizarAvatarLogin(){
-  const val = $("logUser").value.trim();
-  const u = usuarios.find(x => x.user === val);
-  $("loginAvatar").innerHTML = (u && u.foto) ? `<img src="${u.foto}">` : "👤";
+let esperaAvatar = null;
+function pintarAvatarLogin(u){
+  $("loginAvatar").innerHTML = (u && u.foto) ? `<img src="${escapa(u.foto)}">` : "👤";
   $("loginAvatarNombre").textContent = u ? u.nombre : "";
   $("loginAvatarCargo").textContent = u ? (u.cargo || "") : "";
+}
+function actualizarAvatarLogin(){
+  const val = $("logUser").value.trim();
+  pintarAvatarLogin(null);
+  clearTimeout(esperaAvatar);
+  if (!val || !dbCloud) return;
+  esperaAvatar = setTimeout(async () => {
+    try{
+      const s = await dbCloud.collection("accesos").doc(claveUsuario(val)).get();
+      if (s.exists && $("logUser").value.trim() === val) pintarAvatarLogin(s.data());
+    }catch(_e){ /* sin foto previa */ }
+  }, 500);
+}
+// Las fotos se reducen antes de guardarlas en la nube.
+function reducirFoto(origen){
+  return new Promise(resolver => {
+    const im = new Image();
+    im.onload = () => {
+      const k = Math.min(1, 360 / Math.max(im.width, im.height));
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(im.width * k)); c.height = Math.max(1, Math.round(im.height * k));
+      const g = c.getContext("2d");
+      g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
+      g.drawImage(im, 0, 0, c.width, c.height);
+      resolver(c.toDataURL("image/jpeg", .86));
+    };
+    im.onerror = () => resolver("");
+    im.src = origen;
+  });
 }
 let fotoPerfilPendiente = undefined;
 function abrirEditarUsuario(i){
   const u = usuarios[i];
   if (!u) return;
   fotoPerfilPendiente = undefined;
-  const esUnoMismo = u.user === sesion.user;
+  const esUnoMismo = u.uid === sesion.uid;
   $("zonaModal").innerHTML = `
   <div class="modal-fondo" onclick="if(event.target===this)cerrarModal()">
     <div class="modal" style="max-width:420px">
       <h2>${esUnoMismo ? "Mi perfil" : "Editar usuario · " + escapa(u.user)}</h2>
       <div class="full" style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
-        <div class="uc-avatar-grande" id="euAvatarPrev">${u.foto ? `<img src="${u.foto}">` : "👤"}</div>
+        <div class="uc-avatar-grande" id="euAvatarPrev">${u.foto ? `<img src="${escapa(u.foto)}">` : "👤"}</div>
         <div>
           <label style="display:block;font-size:11px;font-weight:800;color:var(--gris);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Foto de perfil</label>
           <input type="file" accept="image/*" id="euFoto" onchange="previsualizarFotoPerfil(this)">
@@ -798,13 +1184,10 @@ function abrirEditarUsuario(i){
       <div class="form-grid">
         <div class="full"><label>Nombre completo</label><input id="euNombre" value="${escapa(u.nombre)}"></div>
         <div class="full"><label>Cargo</label><input id="euCargo" placeholder="Ej. Gerente Administrativo" value="${escapa(u.cargo||"")}"></div>
-        ${!esUnoMismo ? `<div class="full"><label>Rol</label><select id="euRol">
-          <option value="operador" ${u.rol==="operador"?"selected":""}>Operador</option>
-          <option value="admin" ${u.rol==="admin"?"selected":""}>Administrador</option>
-        </select></div>` : ""}
       </div>
       <div class="modal-botones">
         <button class="btn" onclick="guardarEdicionUsuario(${i})">💾 GUARDAR</button>
+        ${esUnoMismo && esAdmin() ? `<button class="btn-sec" onclick="abrirAcceso(${i})">🔑 Cambiar usuario o contraseña</button>` : ""}
         <button class="btn-sec" onclick="cerrarModal()">Cancelar</button>
       </div>
     </div>
@@ -813,23 +1196,28 @@ function abrirEditarUsuario(i){
 function previsualizarFotoPerfil(input){
   const f = input.files[0];
   if (!f) return;
-  if (f.size > 1.5*1024*1024) { alert("La foto debe pesar menos de 1.5 MB."); input.value = ""; return; }
   const r = new FileReader();
-  r.onload = () => {
-    fotoPerfilPendiente = r.result;
+  r.onload = async () => {
+    const lista = await reducirFoto(r.result);
+    if (!lista) return alert("No se pudo abrir la foto. Usa un archivo JPG o PNG.");
+    fotoPerfilPendiente = lista;
     $("euAvatarPrev").innerHTML = `<img src="${fotoPerfilPendiente}">`;
   };
   r.readAsDataURL(f);
 }
-function quitarFotoPerfil(i){
+async function guardarPerfil(u, cambios){
+  const lote = dbCloud.batch();
+  lote.update(dbCloud.collection("miembros").doc(u.uid), cambios);
+  lote.update(dbCloud.collection("accesos").doc(claveUsuario(u.user)), cambios);
+  await lote.commit();
+  Object.assign(u, cambios);
+  if (u.uid === sesion.uid){ Object.assign(sesion, cambios); pintarPerfil(); }
+}
+async function quitarFotoPerfil(i){
   const u = usuarios[i];
   if (!u) return;
-  u.foto = null;
-  guarda("mtc_usuarios", usuarios);
-  if (u.user === sesion.user){
-    sesion = u;
-    $("chipAvatar").innerHTML = "👤";
-  }
+  try { await guardarPerfil(u, { foto:"" }); }
+  catch(err){ return alert(textoError(err)); }
   log(`Quitó la foto de perfil de ${u.user}`);
   abrirEditarUsuario(i);
 }
@@ -838,32 +1226,24 @@ async function guardarEdicionUsuario(i){
   if (!u) return;
   const nombre = $("euNombre").value.trim();
   if (!nombre) return alert("El nombre no puede estar vacío.");
-  if (fotoPerfilPendiente) mostrarCargando("Guardando foto de perfil…");
-  u.nombre = nombre;
-  u.cargo = $("euCargo").value.trim();
-  if (fotoPerfilPendiente !== undefined) u.foto = fotoPerfilPendiente;
-  const selRol = $("euRol");
-  if (selRol) u.rol = selRol.value;
-  guarda("mtc_usuarios", usuarios);
-  if (u.user === sesion.user){
-    sesion = u;
-    $("chipNombre").textContent = u.nombre;
-    $("chipCargo").textContent = u.cargo || "";
-    $("chipAvatar").innerHTML = u.foto ? `<img src="${u.foto}">` : "👤";
-    document.querySelectorAll(".soloAdmin").forEach(b => b.classList.toggle("oculto", u.rol !== "admin"));
-  }
+  const cambios = { nombre, cargo: $("euCargo").value.trim() };
+  if (fotoPerfilPendiente !== undefined) cambios.foto = fotoPerfilPendiente;
+  mostrarCargando("Guardando perfil…");
+  try { await guardarPerfil(u, cambios); }
+  catch(err){ await ocultarCargando(); return alert(textoError(err)); }
   log(`Actualizó datos de usuario ${u.user}`);
   fotoPerfilPendiente = undefined;
-  if (document.getElementById("cargandoOverlay")) await ocultarCargando();
+  await ocultarCargando();
   cerrarModal();
   if (vistaActual === "usuarios") irVista("usuarios");
 }
 function recuperarPass(){
-  alert("Recuperación de contraseña:\n\nPídele al ADMINISTRADOR que restablezca tu contraseña desde el módulo Usuarios.\n\nSi eres el administrador y olvidaste tu clave, restaura una copia de seguridad o contacta a soporte.\n\n(Primer uso: usuario admin · contraseña admin123)");
+  alert("Recuperación de contraseña:\n\nSi eres trabajador, pide al administrador que te ponga una contraseña nueva.\n\nSi eres el administrador y olvidaste tu clave, se recupera desde la consola de Firebase: borrando el documento sistema/config aparece otra vez la pantalla para crear la cuenta principal.");
 }
 
 // ---------- Navegación ----------
 function irVista(v){
+  if (sesion && !esAdmin() && ["usuarios","config","plantillas","backup"].includes(v)) v = "dashboard";
   vistaActual = v;
   document.querySelectorAll("aside .nav").forEach(b => b.classList.toggle("activo", b.dataset.vista === v));
   $("menuLateral").classList.remove("abierto");
@@ -2131,7 +2511,8 @@ actualizarPlantillas();
 
 // ---------- Firmas de las constancias (solo en este dispositivo: nunca se publican) ----------
 const FIRMA_CARGOS = ["Responsable de trámite", "Sello y firma de la oficina"];
-let firmas = lee("mtc_firmas", null) || [{ img:"", nombre:"", cargo:"" }, { img:"", nombre:"", cargo:"" }];
+function firmasVacias(){ return [{ img:"", nombre:"", cargo:"" }, { img:"", nombre:"", cargo:"" }]; }
+let firmas = firmasVacias(); // se cargan al entrar el administrador
 function datosFirma(i, e){
   const f = firmas[i] || {};
   return {
@@ -2222,7 +2603,7 @@ function tarjetaFirmas(){
   };
   return `<div class="card" style="margin-bottom:16px">
     <label style="font-size:11px;font-weight:800;color:var(--gris);letter-spacing:1px">FIRMAS DE LAS CONSTANCIAS</label>
-    <p style="font-size:12.5px;color:var(--gris);margin:4px 0 14px">Sube una foto de cada firma (tinta oscura sobre papel blanco); el fondo se quita solo. Se guardan únicamente en este dispositivo y salen en las constancias que generes desde aquí.</p>
+    <p style="font-size:12.5px;color:var(--gris);margin:4px 0 14px">Sube una foto de cada firma (tinta oscura sobre papel blanco); el fondo se quita solo. Quedan guardadas en tu cuenta: salen en las constancias que generes tú, no en las de tus trabajadores.</p>
     <div style="display:flex;gap:20px;flex-wrap:wrap">${bloque(0)}${bloque(1)}</div>
   </div>`;
 }
@@ -2530,6 +2911,10 @@ function quitarLogoEncabezado(){
 function pintarLogoHeaderTop(){
   const el = $("hmMarca");
   if (!el) return;
+  if (sesion && sesion.rol !== "admin"){
+    el.innerHTML = logoEmpresa ? `<img src="${logoEmpresa}" style="height:42px;max-width:320px;width:auto;object-fit:contain;border-radius:6px;background:#fff;padding:3px;display:block">` : "";
+    return;
+  }
   el.innerHTML = logoEmpresa
     ? `<img src="${logoEmpresa}" style="height:42px;max-width:320px;width:auto;object-fit:contain;border-radius:6px;background:#fff;padding:3px;display:block">
        <label style="cursor:pointer;font-size:10px;opacity:.8;text-decoration:underline;white-space:nowrap">Cambiar
@@ -3006,7 +3391,7 @@ function buscarConsultaInterna(){
 function vistaPapeletas(){
   const tabs = [["estados","📊 Estado de solicitudes"],["registrar","➕ Registrar solicitud"],
     ["consultar","🔎 Consultar por DNI"],["historial","🕘 Historial"],["reportes","📤 Reportes"],
-    ["catalogo","📋 Catálogo"],["config","⚙️ Automatización"]];
+    ["catalogo","📋 Catálogo"],["config","⚙️ Automatización"]].filter(([k]) => esAdmin() || (k !== "catalogo" && k !== "config"));
   return `
     <h1 class="titulo-vista">Eliminación de papeletas</h1>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
@@ -3477,7 +3862,6 @@ function cambiarEstadoSol(id, nuevo){
   pintarPapeletas();
 }
 function eliminarSolicitud(id){
-  if (sesion.rol !== "admin") return alert("Solo un administrador puede eliminar solicitudes.");
   const s = solicitudes.find(x => x.id === id);
   if (!confirm(`¿Eliminar la solicitud de ${s.nombres} ${s.apellidos}?`)) return;
   solicitudes = solicitudes.filter(x => x.id !== id);
@@ -3899,58 +4283,138 @@ function vistaAuditoria(){
 
 // ---------- Usuarios (admin) ----------
 function vistaUsuarios(){
+  const cuantos = (col, mid) => crudo[col].filter(r => duenoDe(r) === mid).length;
   const filas = usuarios.map((u,i) => `
     <tr><td><b>${escapa(u.user)}</b></td><td>${escapa(u.nombre)}</td><td>${escapa(u.cargo||"")}</td>
-    <td><span class="estado ${u.rol==="admin"?"e-observado":"e-finalizado"}">${u.rol==="admin"?"ADMIN":"OPERADOR"}</span></td>
+    <td><span class="estado ${u.rol==="admin"?"e-observado":"e-finalizado"}">${u.rol==="admin"?"ADMIN":"TRABAJADOR"}</span></td>
+    <td style="white-space:nowrap">Trámites: <b>${cuantos("expedientes", u.mid)}</b> · Papeletas: <b>${cuantos("solicitudes", u.mid)}</b> · Evaluaciones: <b>${cuantos("evaluaciones", u.mid)}</b></td>
     <td class="acciones">
-      <button title="Editar" onclick="abrirEditarUsuario(${i})">✏️</button>
-      <button title="Restablecer contraseña" onclick="resetPass(${i})">🔑</button>
-      ${u.user !== "admin" ? `<button title="Eliminar" onclick="delUsuario(${i})">🗑️</button>` : ""}
+      <button title="Editar nombre, cargo y foto" onclick="abrirEditarUsuario(${i})">✏️</button>
+      <button title="Cambiar usuario o contraseña" onclick="abrirAcceso(${i})">🔑</button>
+      ${u.rol !== "admin" ? `<button title="Eliminar" onclick="delUsuario(${i})">🗑️</button>` : ""}
     </td></tr>`).join("");
   return `
     <h1 class="titulo-vista">Usuarios del sistema</h1>
     <div class="card" style="max-width:520px;margin-bottom:16px">
       <h3 style="font-size:15px;margin-bottom:6px">🔒 Sesiones abiertas</h3>
-      <p style="font-size:12.5px;color:var(--gris);margin-bottom:12px">Cierra la sesión en todos tus dispositivos (computadora, celular, etc.). Cada uno te pedirá usuario y contraseña de nuevo.</p>
+      <p style="font-size:12.5px;color:var(--gris);margin-bottom:12px">Cierra la sesión en todos los dispositivos (los tuyos y los de tus trabajadores). Cada uno pedirá usuario y contraseña de nuevo.</p>
       <button class="btn" onclick="cerrarSesionesTodas()">CERRAR SESIÓN EN TODOS LOS DISPOSITIVOS</button>
     </div>
     <div class="card" style="max-width:520px;margin-bottom:16px">
-      <h3 style="font-size:15px;margin-bottom:10px">➕ Crear usuario</h3>
+      <h3 style="font-size:15px;margin-bottom:6px">➕ Crear trabajador</h3>
+      <p style="font-size:12.5px;color:var(--gris);margin-bottom:12px">Entrará desde cualquier equipo con este usuario y contraseña, y solo verá los registros que haga.</p>
       <div class="form-grid">
-        <div><label>Usuario</label><input id="uUser"></div>
-        <div><label>Nombre completo</label><input id="uNombre"></div>
+        <div><label>Usuario</label><input id="uUser" autocomplete="off"></div>
+        <div><label>Nombre completo</label><input id="uNombre" autocomplete="off"></div>
         <div><label>Cargo</label><input id="uCargo" placeholder="Ej. Asistente administrativo"></div>
-        <div><label>Contraseña</label><input id="uPass" type="password"></div>
-        <div><label>Rol</label><select id="uRol"><option value="operador">Operador</option><option value="admin">Administrador</option></select></div>
+        <div><label>Contraseña</label><input id="uPass" type="password" autocomplete="new-password"></div>
       </div>
       <button class="btn" style="margin-top:12px" onclick="crearUsuario()">CREAR</button>
     </div>
     <div class="tabla-scroll"><table>
-      <thead><tr><th>Usuario</th><th>Nombre</th><th>Cargo</th><th>Rol</th><th>Acciones</th></tr></thead>
+      <thead><tr><th>Usuario</th><th>Nombre</th><th>Cargo</th><th>Rol</th><th>Registros</th><th>Acciones</th></tr></thead>
       <tbody>${filas}</tbody></table></div>`;
 }
+// Crea la cuenta en una conexión aparte para no cerrar la sesión del administrador.
+async function crearCuentaNube(clave){
+  const correo = correoNuevo();
+  const app = (firebase.apps || []).find(a => a.name === "alta") || firebase.initializeApp(firebaseConfig, "alta");
+  const aux = app.auth();
+  await aux.setPersistence("none");
+  const cred = await aux.createUserWithEmailAndPassword(correo, clave);
+  await aux.signOut();
+  return { uid: cred.user.uid, correo };
+}
+const usuarioOcupado = async u => (await dbCloud.collection("accesos").doc(claveUsuario(u)).get()).exists;
 async function crearUsuario(){
-  const user = $("uUser").value.trim(), nombre = $("uNombre").value.trim(), pass = $("uPass").value;
-  if (!user || !nombre || pass.length < 6) return alert("Completa todo. La contraseña debe tener mínimo 6 caracteres.");
-  if (usuarios.some(u => u.user === user)) return alert("Ese usuario ya existe.");
-  usuarios.push({ user, nombre, cargo: $("uCargo").value.trim(), rol: $("uRol").value, pass: await hash(pass) });
-  guarda("mtc_usuarios", usuarios);
-  log(`Creó usuario ${user} (${$("uRol").value})`);
+  const usuario = $("uUser").value.trim(), nombre = $("uNombre").value.trim(), clave = $("uPass").value, cargo = $("uCargo").value.trim();
+  if (usuario.length < 3 || !nombre || clave.length < 6) return alert("Completa todo. El usuario debe tener mínimo 3 caracteres y la contraseña mínimo 6.");
+  mostrarCargando("Creando trabajador…");
+  try{
+    if (await usuarioOcupado(usuario)){ await ocultarCargando(); return alert("Ese usuario ya existe."); }
+    const { uid, correo } = await crearCuentaNube(clave);
+    const mid = "t-" + uid;
+    const lote = dbCloud.batch();
+    lote.set(dbCloud.collection("miembros").doc(uid), { mid, usuario, nombre, cargo, foto:"", rol:"trabajador", correo });
+    lote.set(dbCloud.collection("accesos").doc(claveUsuario(usuario)), { uid, correo, nombre, cargo, foto:"" });
+    await lote.commit();
+  }catch(err){ await ocultarCargando(); return alert(textoError(err)); }
+  log(`Creó el trabajador ${usuario}`);
+  await ocultarCargando();
   irVista("usuarios");
+  alert(`Trabajador creado. Entrégale su usuario "${usuario}" y la contraseña que escribiste.`);
 }
-async function resetPass(i){
-  const nueva = prompt("Nueva contraseña para " + usuarios[i].user + " (mínimo 6 caracteres):");
-  if (!nueva || nueva.length < 6) return;
-  usuarios[i].pass = await hash(nueva);
-  guarda("mtc_usuarios", usuarios);
-  log(`Restableció la contraseña de ${usuarios[i].user}`);
-  alert("Contraseña actualizada.");
+function abrirAcceso(i){
+  const u = usuarios[i];
+  if (!u) return;
+  const propio = u.uid === sesion.uid;
+  $("zonaModal").innerHTML = `
+  <div class="modal-fondo" onclick="if(event.target===this)cerrarModal()">
+    <div class="modal" style="max-width:420px">
+      <h2>${propio ? "Mi usuario y contraseña" : "Acceso de " + escapa(u.nombre)}</h2>
+      <div class="form-grid">
+        <div class="full"><label>Usuario</label><input id="acUser" value="${escapa(u.user)}" autocomplete="off"></div>
+        <div class="full"><label>Contraseña nueva (vacío: no cambia)</label><input id="acPass" type="password" autocomplete="new-password"></div>
+        <div class="full"><label>Repite la contraseña nueva</label><input id="acPass2" type="password" autocomplete="new-password"></div>
+        ${propio ? `<div class="full"><label>Tu contraseña actual</label><input id="acActual" type="password" autocomplete="current-password"></div>` : ""}
+      </div>
+      <div class="modal-botones">
+        <button class="btn" onclick="guardarAcceso(${i})">💾 GUARDAR</button>
+        <button class="btn-sec" onclick="cerrarModal()">Cancelar</button>
+      </div>
+    </div>
+  </div>`;
 }
-function delUsuario(i){
-  if (!confirm("¿Eliminar al usuario " + usuarios[i].user + "?")) return;
-  log(`Eliminó al usuario ${usuarios[i].user}`);
-  usuarios.splice(i,1);
-  guarda("mtc_usuarios", usuarios);
+async function guardarAcceso(i){
+  const u = usuarios[i];
+  if (!u) return;
+  const propio = u.uid === sesion.uid;
+  const usuario = $("acUser").value.trim(), clave = $("acPass").value, minimo = propio ? 8 : 6;
+  const actual = propio ? $("acActual").value : "";
+  if (usuario.length < 3) return alert("El usuario debe tener mínimo 3 caracteres.");
+  if (clave && clave.length < minimo) return alert(`La contraseña nueva debe tener mínimo ${minimo} caracteres.`);
+  if (clave !== $("acPass2").value) return alert("Las dos contraseñas no coinciden.");
+  const cambiaUsuario = claveUsuario(usuario) !== claveUsuario(u.user);
+  if (!clave && usuario === u.user) return cerrarModal();
+  if (propio && !actual) return alert("Escribe tu contraseña actual para confirmar.");
+  mostrarCargando("Guardando acceso…");
+  try{
+    if (cambiaUsuario && await usuarioOcupado(usuario)){ await ocultarCargando(); return alert("Ese usuario ya existe."); }
+    let uid = u.uid, correo = u.correo;
+    if (propio){
+      await authNube.currentUser.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.correo, actual));
+      if (clave) await authNube.currentUser.updatePassword(clave);
+    } else if (clave){
+      // La contraseña de otra persona se cambia dándole una cuenta nueva; sus registros se conservan.
+      ({ uid, correo } = await crearCuentaNube(clave));
+    }
+    const miembro = { mid: u.mid, usuario, nombre: u.nombre, cargo: u.cargo, foto: u.foto, rol: u.rol, correo };
+    const lote = dbCloud.batch(), miembros = dbCloud.collection("miembros"), accesos = dbCloud.collection("accesos");
+    lote.set(miembros.doc(uid), miembro);
+    if (uid !== u.uid) lote.delete(miembros.doc(u.uid));
+    if (claveUsuario(usuario) !== claveUsuario(u.user)) lote.delete(accesos.doc(claveUsuario(u.user)));
+    lote.set(accesos.doc(claveUsuario(usuario)), { uid, correo, nombre: u.nombre, cargo: u.cargo, foto: u.foto });
+    await lote.commit();
+  }catch(err){
+    await ocultarCargando();
+    return alert(propio && textoError(err) === "Usuario o contraseña incorrectos." ? "Tu contraseña actual no es correcta." : textoError(err));
+  }
+  log(`Cambió el acceso de ${u.user}`);
+  await ocultarCargando();
+  cerrarModal();
+  alert("Acceso actualizado.");
+}
+async function delUsuario(i){
+  const u = usuarios[i];
+  if (!u || u.rol === "admin") return;
+  if (!confirm(`¿Eliminar al trabajador ${u.nombre}? Ya no podrá entrar. Sus registros se conservan y seguirás viéndolos.`)) return;
+  try{
+    const lote = dbCloud.batch();
+    lote.delete(dbCloud.collection("miembros").doc(u.uid));
+    lote.delete(dbCloud.collection("accesos").doc(claveUsuario(u.user)));
+    await lote.commit();
+  }catch(err){ return alert(textoError(err)); }
+  log(`Eliminó al trabajador ${u.user}`);
   irVista("usuarios");
 }
 
@@ -3965,7 +4429,7 @@ function vistaBackup(){
     </div>
     <div class="card" style="max-width:520px">
       <h3 style="font-size:15px;margin-bottom:8px">💾 Respaldo completo</h3>
-      <p style="font-size:13px;color:var(--gris);margin-bottom:14px">Descarga un respaldo completo (expedientes, usuarios, auditoría y configuración) o restaura uno anterior. Recomendado: exporta una copia al final de cada día.</p>
+      <p style="font-size:13px;color:var(--gris);margin-bottom:14px">Descarga un respaldo completo (trámites, papeletas, evaluaciones, auditoría y configuración) o restaura uno anterior. Recomendado: exporta una copia al final de cada día.</p>
       <button class="btn" style="width:100%;margin-bottom:10px" onclick="exportarBackup()">⬇️ DESCARGAR COPIA DE SEGURIDAD</button>
       <label style="font-size:12px;font-weight:800;color:var(--gris)">RESTAURAR DESDE ARCHIVO</label>
       <input type="file" accept=".json" onchange="importarBackup(this)">
@@ -4023,7 +4487,7 @@ function publicarPortal(){
   alert(`Archivo generado (${pesoMB} MB).\n\nSube 'datos-publicos.json' a la misma carpeta donde está el portal de consulta (consulta-tramite.html) para que tus clientes vean los estados actualizados y puedan descargar los documentos que subiste.`);
 }
 function exportarBackup(){
-  const data = { expedientes, usuarios, auditoria, notifs, config, plantillas, firmas, pieDoc, solicitudes, catalogo, cfgPap, fecha: ahora() };
+  const data = { expedientes: crudo.expedientes, solicitudes: crudo.solicitudes, evaluaciones: crudo.evaluaciones, auditoria, notifs, config, plantillas, firmas, pieDoc, catalogo, cfgPap, fecha: ahora() };
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], {type:"application/json"}));
   a.download = "backup_tramites_" + new Date().toISOString().slice(0,10) + ".json";
@@ -4038,7 +4502,7 @@ function importarBackup(inp){
   r.onload = () => {
     try {
       const d = JSON.parse(r.result);
-      expedientes = d.expedientes || []; usuarios = d.usuarios || usuarios;
+      expedientes = d.expedientes || [];
       auditoria = d.auditoria || []; notifs = d.notifs || []; config = d.config || config;
       if (d.plantillas) { plantillas = d.plantillas; guarda("mtc_plantillas", plantillas); }
       if (d.firmas) { firmas = d.firmas; guarda("mtc_firmas", firmas); }
@@ -4046,9 +4510,10 @@ function importarBackup(inp){
       if (d.solicitudes) { solicitudes = d.solicitudes; guarda("mtc_solicitudes", solicitudes); solicitudes.forEach(guardarSolicitudNube); }
       if (d.catalogo) { catalogo = d.catalogo; guarda("mtc_catalogo_v2", catalogo); guardarCatalogoNube(); }
       if (d.cfgPap) { cfgPap = d.cfgPap; guarda("mtc_cfgpap", cfgPap); }
-      guarda("mtc_expedientes", expedientes); guarda("mtc_usuarios", usuarios);
+      guarda("mtc_expedientes", expedientes);
       guarda("mtc_auditoria", auditoria); guarda("mtc_notifs", notifs); guarda("mtc_config", config);
       expedientes.forEach(guardarExpedienteNube);
+      if (d.evaluaciones) { evaluaciones = d.evaluaciones; guarda("mtc_evaluaciones", evaluaciones); evaluaciones.forEach(guardarEvaluacionNube); }
       log("Restauró copia de seguridad del " + (d.fecha || "?"));
       alert("Copia restaurada correctamente.");
       irVista("dashboard");
@@ -4058,6 +4523,7 @@ function importarBackup(inp){
 }
 
 // Enter en login
+$("priPass2").addEventListener("keydown", e => { if (e.key === "Enter") crearPrincipal(); });
 $("logPass").addEventListener("keydown", e => { if (e.key === "Enter") iniciarSesion(); });
 </script>
 <!-- ICONOGRAFÍA CORPORATIVA: cambia los emojis visibles por íconos de línea. Solo apariencia. -->

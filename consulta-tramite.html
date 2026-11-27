@@ -415,9 +415,8 @@ const escapa = t => String(t ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'
 })();
 
 // ---------- Datos en vivo (Firestore, sesión anónima de solo lectura) ----------
-// Esta página lee en vivo directamente de la nube: ya no depende de que la oficina genere y
-// suba a mano un archivo cada vez que cambia algo. Las reglas de Firestore solo dejan LEER a
-// una sesión anónima como esta — nunca escribir ni borrar — así que es segura para el público.
+// Esta página lee en vivo de la nube. Las reglas de Firestore solo permiten leer, sabiendo el
+// DNI, la copia recortada de sus registros: nada más, y sin poder escribir ni borrar.
 // Si por algún motivo la nube no responde (sin internet, bloqueada, etc.), se usa como respaldo
 // el archivo datos-publicos.json si existe.
 const firebaseConfig = {
@@ -433,71 +432,16 @@ try{
   if (typeof firebase !== "undefined"){
     firebase.initializeApp(firebaseConfig);
     dbCloud = firebase.firestore();
-    firebase.auth().signInAnonymously().catch(err => console.error("Firebase auth:", err));
   }
 }catch(_e){ /* sin nube: se intenta el archivo estático como respaldo */ }
 
-let catalogoCache = null;
-async function obtenerCatalogo(){
-  if (catalogoCache) return catalogoCache;
-  try{
-    const snap = await dbCloud.collection("meta").doc("catalogo").get();
-    catalogoCache = (snap.exists && snap.data().datos) ? snap.data().datos : {};
-  }catch(_e){ catalogoCache = {}; }
-  return catalogoCache;
-}
-// Mismo recorte de campos que "Publicar portal" en el sistema interno: no expone correo,
-// historial interno, ni los archivos de requisitos (exámenes/COFIPRO).
-function moldearTramitePublico(e){
-  return {
-    dni: e.dni, nombres: e.nombres, apellidos: e.apellidos,
-    tipo: e.tipo, estado: e.estado,
-    fechaRegistro: e.fechaRegistro,
-    actualizado: (e.historial && e.historial[0] ? e.historial[0].fecha : e.fechaRegistro),
-    codigo: (e.id || "").replace("E","EXP-"),
-    categoria: e.categoria || "", aptitud: e.aptitud || "", tipoLicencia: e.tipoLicencia || "",
-    restricciones: e.restricciones || "", centroEmision: e.centroEmision || "",
-    numeroLicencia: e.numeroLicencia || "", fechaExpedicion: e.fechaExpedicion || "",
-    vigenteHasta: e.vigenteHasta || "",
-    direccion: e.direccion || "", foto: e.foto || null,
-    observaciones: e.observaciones || "", sede: e.sede || "", fechaFin: e.fechaFin || "",
-    responsable: e.responsable || "",
-    docs: (e.docs || []).map(d => ({ nombre: d.nombre, data: d.data }))
-  };
-}
-function moldearSolicitudPublica(s, catalogo){
-  return {
-    dni: s.dni, estado: s.estado,
-    fechaRegistro: s.fechaRegistro, actualizado: s.actualizado,
-    papeletas: (s.papeletas || []).map(p => {
-      const c = catalogo[p.codigo] || {};
-      return { codigo: p.codigo, nivel: c.n || "", puntos: c.p || 0, multa: c.m || 0 };
-    }),
-    consultaOficial: s.consultaOficial || null,
-    pagoConfirmadoMs: s.pagoConfirmadoMs || null,
-    numeroOperacion: s.numeroOperacion || null,
-    montoPagado: s.montoPagado || null,
-    valorDocumento: s.valorDocumento || null,
-    fechaAprobacion: s.fechaAprobacion || null
-  };
-}
-function moldearEvaluacionPublica(ev){
-  return { dni: ev.dni, nombres: ev.nombres, apellidos: ev.apellidos, resultado: ev.resultado, categorias: ev.categorias || [], fecha: ev.fecha };
-}
 async function buscarDatosDe(dni){
   if (dbCloud){
     try{
-      const [snapExp, snapSol, snapEval, catalogo] = await Promise.all([
-        dbCloud.collection("expedientes").where("dni","==",dni).get(),
-        dbCloud.collection("solicitudes").where("dni","==",dni).get(),
-        dbCloud.collection("evaluaciones").where("dni","==",dni).get(),
-        obtenerCatalogo()
-      ]);
-      return {
-        tramites: snapExp.docs.map(d => moldearTramitePublico(d.data())),
-        papeletas: snapSol.docs.map(d => moldearSolicitudPublica(d.data(), catalogo)),
-        evaluaciones: snapEval.docs.map(d => moldearEvaluacionPublica(d.data()))
-      };
+      const snap = await dbCloud.collection("publico").doc(dni).collection("registros").get();
+      const registros = snap.docs.map(d => d.data()).sort((a,b) => String(b.datos.codigo || "").localeCompare(String(a.datos.codigo || "")));
+      const de = tipo => registros.filter(r => r.tipo === tipo).map(r => r.datos);
+      return { tramites: de("tramite"), papeletas: de("papeleta"), evaluaciones: de("evaluacion") };
     }catch(err){ console.error("Firestore (consulta):", err); /* sigue al respaldo de abajo */ }
   }
   try{
