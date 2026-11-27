@@ -223,64 +223,139 @@ function mostrarLista(lista){
 }
 function mostrarConstanciaIndice(i){ mostrarConstancia(window.__listaActual[i]); }
 
+function plantillaBase(titulo, subtitulo){
+  return `<style>
+  .cst{width:718px;max-width:100%;min-height:1030px;margin:0 auto;display:flex;flex-direction:column;background:#fff;color:#1f1a1a;font-family:'Segoe UI',Arial,sans-serif;font-feature-settings:normal;line-height:1.35;text-align:left;border:1px solid #D62828}
+  .cst,.cst *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .cst table{width:100%;border-collapse:collapse;table-layout:fixed;background:transparent;box-shadow:none;border-radius:0;margin:0}
+  .cst td{padding:0;border:0;background:transparent;vertical-align:middle;text-align:left;font-size:12px;color:#1f1a1a;overflow-wrap:break-word}
+  .cst .cst-cab{background:#D62828;padding:18px 24px}
+  .cst .cst-cab table{table-layout:auto}
+  .cst .cst-cab td{color:#fff}
+  .cst .marca{font-size:24px;font-weight:700;letter-spacing:1px;white-space:nowrap}
+  .cst .cst-rubro{font-size:11px;letter-spacing:.5px}
+  .cst .cst-cab td.cst-exp{text-align:right;white-space:nowrap;font-size:10px;letter-spacing:1px}
+  .cst .cst-exp b{display:block;font-size:15px;margin-top:3px}
+  .cst .cst-titulo{padding:14px 24px;border-bottom:3px solid #D62828}
+  .cst .cst-titulo table{table-layout:auto}
+  .cst .cst-titulo h1{margin:0;padding:0;font-size:19px;font-weight:700;letter-spacing:2px;color:#1f1a1a}
+  .cst .cst-titulo p{margin:3px 0 0;font-size:11px;letter-spacing:1px;color:#6b5f5f}
+  .cst .cst-titulo td.cst-estado{text-align:right;white-space:nowrap}
+  .cst .cst-estado span{display:inline-block;border:2px solid {{color_estado}};color:{{color_estado}};border-radius:6px;padding:7px 14px;font-size:12px;font-weight:700;letter-spacing:1px}
+  .cst .cst-cuerpo{padding:4px 24px 0}
+  .cst .cst-sec{margin-top:14px;background:#D62828;color:#fff;padding:6px 10px;font-size:11px;font-weight:700;letter-spacing:1px}
+  .cst .cst-datos td{border:1px solid #E5C9C9;padding:6px 10px;height:31px}
+  .cst .cst-datos td.cst-et{background:#FBEDED;color:#5f5252;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px}
+  .cst .cst-datos td.cst-foto{text-align:center;padding:6px}
+  .cst .cst-foto img{max-width:108px;max-height:134px}
+  .cst .cst-foto img+div,.cst .cst-foto>div{margin-left:auto;margin-right:auto}
+  .cst .cst-foto-txt{font-size:9px;color:#6b5f5f;margin-top:4px}
+  .cst .cst-obs{border:1px solid #E5C9C9;border-top:0;padding:10px;font-size:12px;min-height:54px}
+  .cst .cst-firmas{margin-top:auto;padding:24px 24px 18px}
+  .cst .cst-firmas td{width:50%;text-align:center;vertical-align:bottom;padding:0 24px}
+  .cst .cst-firma-img{height:88px;display:flex;align-items:flex-end;justify-content:center}
+  .cst .cst-firma-img img{max-height:88px;max-width:230px}
+  .cst .cst-linea{border-top:1px solid #333;margin:3px 0 6px}
+  .cst .cst-nombre{font-size:12.5px;font-weight:700}
+  .cst .cst-cargo{font-size:10.5px;color:#6b5f5f}
+  .cst .cst-pie{background:#D62828;color:#fff;padding:10px 24px;font-size:9.5px;text-align:center}
+  @media print{@page{size:A4;margin:10mm} body{margin:0;padding:0}}
+  </style>
+  <div class="cst">
+    <div class="cst-cab"><table><tr>
+      <td style="width:1%;white-space:nowrap">{{logo_empresa}}</td>
+      <td style="padding-left:14px"><div class="cst-rubro">{{empresa_rubro}}</div></td>
+      <td class="cst-exp">N° DE EXPEDIENTE<b>{{codigo_expediente}}</b></td>
+    </tr></table></div>
+    <div class="cst-titulo"><table><tr>
+      <td><h1>${titulo}</h1><p>${subtitulo}</p></td>
+      <td class="cst-estado"><span>{{estado}}</span></td>
+    </tr></table></div>
+    <div class="cst-cuerpo">
+      <div class="cst-sec">DATOS DEL TITULAR</div>
+      <table class="cst-datos">
+        <colgroup><col style="width:118px"><col><col style="width:132px"></colgroup>
+          <tr><td class="cst-et">Nombres y apellidos</td><td><b>{{nombre_completo}}</b></td>
+            <td class="cst-foto" rowspan="4">{{foto}}<div class="cst-foto-txt">FOTO DEL CLIENTE</div></td></tr>
+          <tr><td class="cst-et">DNI</td><td>{{dni}}</td></tr>
+          <tr><td class="cst-et">Dirección</td><td>{{direccion}}</td></tr>
+          <tr><td class="cst-et">Sede</td><td>{{sede}}</td></tr>
+      </table>
+      <div class="cst-sec">DATOS DEL TRÁMITE</div>
+      <table class="cst-datos">
+        <colgroup><col style="width:118px"><col><col style="width:118px"><col></colgroup>
+          <tr><td class="cst-et">Tipo de trámite</td><td>{{tipo_tramite}}</td><td class="cst-et">Cód. verificación</td><td>{{codigo_verificacion}}</td></tr>
+          <tr><td class="cst-et">Fecha de ingreso</td><td>{{fecha_registro}}</td><td class="cst-et">Fecha de finalización</td><td>{{fecha_fin}}</td></tr>
+          <tr><td class="cst-et">Responsable</td><td colspan="3">{{responsable}}</td></tr>
+      </table>
+      <div class="cst-sec">DATOS DE LA LICENCIA</div>
+      <table class="cst-datos">
+        <colgroup><col style="width:118px"><col><col style="width:118px"><col></colgroup>
+          <tr><td class="cst-et">Clase y categoría</td><td>{{categoria}}</td><td class="cst-et">Tipo de licencia</td><td>{{tipo_licencia}}</td></tr>
+          <tr><td class="cst-et">Restricciones</td><td>{{restricciones}}</td><td class="cst-et">Centro de emisión</td><td>{{centro_emision}}</td></tr>
+          <tr><td class="cst-et">Número de licencia</td><td>{{numero_licencia}}</td><td class="cst-et">Fecha de expedición</td><td>{{fecha_expedicion}}</td></tr>
+          <tr><td class="cst-et">Vigente hasta</td><td colspan="3">{{vigente_hasta}}</td></tr>
+      </table>
+      <div class="cst-sec">OBSERVACIONES</div>
+      <div class="cst-obs">{{observaciones}}</div>
+    </div>
+    <div class="cst-firmas">
+      <table><tr>
+        <td><div class="cst-firma-img">{{firma_1}}</div><div class="cst-linea"></div><div class="cst-nombre">{{nombre_firma_1}}</div><div class="cst-cargo">{{cargo_firma_1}}</div></td>
+        <td><div class="cst-firma-img">{{firma_2}}</div><div class="cst-linea"></div><div class="cst-nombre">{{nombre_firma_2}}</div><div class="cst-cargo">{{cargo_firma_2}}</div></td>
+      </tr></table>
+    </div>
+    <div class="cst-pie">{{empresa_direccion}} {{empresa_contacto}}<br>
+    Documento interno de gestión emitido por {{empresa}} el {{fecha_actual}} a las {{hora_actual}} · No constituye documento oficial del Estado.</div>
+  </div>`;
+}
 function generarConstanciaHtml(t){
   const colores = { tramite:"#F77F00", aprobado:"#1B9E4B", observado:"#D62828", finalizado:"#2264D1" };
   const hoy = new Date();
-  const foto = t.foto
-    ? `<img src="${t.foto}">`
-    : `<div style="width:110px;height:138px;border:1px dashed #bbb;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:38px">&#128100;</div>`;
-  const logoHeader = logoGuardado
-    ? `<img src="${logoGuardado}" style="height:44px;width:auto;object-fit:contain;background:#fff;border-radius:6px;padding:4px">`
-    : `<div class="marca-doc">${escapa(EMPRESA.nombre)}</div>`;
   const subtitulos = {
     nueva:"GESTIÓN DE NUEVA LICENCIA", revalidacion:"GESTIÓN DE REVALIDACIÓN",
     recategorizacion:"GESTIÓN DE RECATEGORIZACIÓN", retenciones:"GESTIÓN DE RETENCIÓN"
   };
-  const codigoVerificacion = "VF-" + t.dni + "-" + String(t.codigo).slice(-4);
-  return `<div class="hoja" id="hojaConstancia">
-    <div class="cab"><table><tr>
-      <td style="width:1%;white-space:nowrap;vertical-align:middle">${logoHeader}</td>
-      <td style="vertical-align:middle;padding-left:12px"><div class="rubro">${escapa(EMPRESA.rubro)}</div></td>
-      <td class="cod" style="vertical-align:middle;white-space:nowrap">N° DE EXPEDIENTE<br><b>${escapa(t.codigo)}</b></td>
-    </tr></table></div>
-    <div class="titulo"><h2>CONSTANCIA DE TRÁMITE</h2><p>${subtitulos[t.tipo] || ""}</p></div>
-    <div class="cuerpo">
-      <div class="datos"><div class="grid-campos">
-        <div class="campo"><span class="et">Cliente</span><span class="val"><b>${escapa(t.nombres)} ${escapa(t.apellidos)}</b></span></div>
-        <div class="campo"><span class="et">DNI</span><span class="val">${escapa(t.dni)}</span></div>
-        <div class="campo"><span class="et">Dirección</span><span class="val">${escapa(t.direccion) || "—"}</span></div>
-        <div class="campo"><span class="et">Tipo de trámite</span><span class="val">${escapa(TIPOS[t.tipo] || t.tipo)}</span></div>
-        <div class="campo"><span class="et">Sede</span><span class="val">${escapa(t.sede) || escapa(EMPRESA.direccion)}</span></div>
-        <div class="campo"><span class="et">Fecha de ingreso</span><span class="val">${escapa(t.fechaRegistro)}</span></div>
-        <div class="campo"><span class="et">Fecha de finalización</span><span class="val">${escapa(t.fechaFin) || "—"}</span></div>
-        <div class="campo"><span class="et">Responsable</span><span class="val">${escapa(t.responsable) || "—"}</span></div>
-        <div class="campo"><span class="et">Cód. verificación</span><span class="val">${escapa(codigoVerificacion)}</span></div>
-      </div></div>
-      <div class="foto" style="text-align:center">${foto}<div style="font-size:10px;color:#8B7F7F;margin-top:6px">FOTO DEL CLIENTE</div></div>
-    </div>
-    <div class="seccion-licencia">
-      <h3 class="subt">Datos de la licencia</h3>
-      <div class="grid-campos">
-        <div class="campo"><span class="et">Clase y categoría</span><span class="val">${escapa(t.categoria) || "—"}</span></div>
-        <div class="campo"><span class="et">Tipo de licencia</span><span class="val">${escapa(t.tipoLicencia) || "—"}</span></div>
-        <div class="campo"><span class="et">Restricciones</span><span class="val">${escapa(t.restricciones) || "Sin restricciones"}</span></div>
-        <div class="campo"><span class="et">Centro de emisión</span><span class="val">${escapa(t.centroEmision) || "—"}</span></div>
-        <div class="campo"><span class="et">Número de licencia</span><span class="val">${escapa(t.numeroLicencia) || "—"}</span></div>
-        <div class="campo"><span class="et">Fecha de expedición</span><span class="val">${escapa(t.fechaExpedicion) || "—"}</span></div>
-        <div class="campo"><span class="et">Vigente hasta</span><span class="val">${escapa(t.vigenteHasta) || "—"}</span></div>
-      </div>
-    </div>
-    <div class="sello"><span style="border-color:${colores[t.estado]};color:${colores[t.estado]}">${escapa((ESTADOS[t.estado]||{txt:t.estado}).txt.toUpperCase())}</span></div>
-    <div class="obs"><b>Observaciones:</b> ${escapa(t.observaciones) || "Sin observaciones."}</div>
-    <div class="firmas">
-      <div class="firma"><div class="linea"></div><b>${escapa(t.responsable) || "—"}</b><br><small>Responsable de trámite</small></div>
-      <div class="firma"><div class="linea"></div><b>${escapa(EMPRESA.nombre)}</b><br><small>Sello y firma de la oficina</small></div>
-    </div>
-    <div class="pie">${escapa(EMPRESA.direccion)}<br>
-    Documento interno de gestión emitido por ${escapa(EMPRESA.nombre)} el ${hoy.toLocaleDateString("es-PE")} a las ${hoy.toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"})}. No constituye documento oficial del Estado.</div>
-  </div>`;
+  const v = x => escapa(x) || "—";
+  const vals = {
+    "{{logo_empresa}}": logoGuardado
+      ? `<img src="${logoGuardado}" style="height:44px;width:auto;background:#fff;border-radius:6px;padding:4px">`
+      : `<div class="marca">${escapa(EMPRESA.nombre)}</div>`,
+    "{{nombre_completo}}": escapa(t.nombres + " " + t.apellidos),
+    "{{dni}}": escapa(t.dni),
+    "{{direccion}}": v(t.direccion),
+    "{{foto}}": t.foto ? `<img src="${t.foto}">`
+      : `<div style="width:100px;height:112px;border:1px dashed #bbb;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:34px">&#128100;</div>`,
+    "{{tipo_tramite}}": escapa(TIPOS[t.tipo] || t.tipo),
+    "{{categoria}}": v(t.categoria),
+    "{{sede}}": escapa(t.sede) || escapa(EMPRESA.direccion),
+    "{{tipo_licencia}}": v(t.tipoLicencia),
+    "{{restricciones}}": escapa(t.restricciones) || "Sin restricciones",
+    "{{centro_emision}}": v(t.centroEmision),
+    "{{numero_licencia}}": v(t.numeroLicencia),
+    "{{fecha_expedicion}}": v(t.fechaExpedicion),
+    "{{vigente_hasta}}": v(t.vigenteHasta),
+    "{{estado}}": escapa((ESTADOS[t.estado] || { txt:t.estado }).txt.toUpperCase()),
+    "{{color_estado}}": colores[t.estado] || "#999999",
+    "{{observaciones}}": escapa(t.observaciones) || "Sin observaciones.",
+    "{{codigo_expediente}}": escapa(t.codigo),
+    "{{codigo_verificacion}}": escapa("VF-" + t.dni + "-" + String(t.codigo).slice(-4)),
+    "{{fecha_registro}}": v(t.fechaRegistro),
+    "{{fecha_fin}}": v(t.fechaFin),
+    "{{fecha_actual}}": hoy.toLocaleDateString("es-PE"),
+    "{{hora_actual}}": hoy.toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"}),
+    "{{responsable}}": v(t.responsable),
+    "{{empresa}}": escapa(EMPRESA.nombre),
+    "{{empresa_rubro}}": escapa(EMPRESA.rubro),
+    "{{empresa_direccion}}": escapa(EMPRESA.direccion),
+    "{{empresa_contacto}}": "",
+    "{{firma_1}}": "", "{{nombre_firma_1}}": v(t.responsable), "{{cargo_firma_1}}": "Responsable de trámite",
+    "{{firma_2}}": "", "{{nombre_firma_2}}": escapa(EMPRESA.nombre), "{{cargo_firma_2}}": "Sello y firma de la oficina"
+  };
+  // Un solo reemplazo: así un dato del cliente nunca se interpreta como otro marcador.
+  return plantillaBase("CONSTANCIA DE TRÁMITE", subtitulos[t.tipo] || "")
+    .replace(/\{\{[a-z_0-9]+\}\}/g, m => m in vals ? vals[m] : m);
 }
-
 function mostrarConstancia(t){
   $("listaZona").innerHTML = "";
   $("constanciaZona").innerHTML = `
@@ -288,8 +363,12 @@ function mostrarConstancia(t){
       <button class="btn" id="btnDescargar" onclick="descargarPDF()">📥 DESCARGAR PDF</button>
       <button class="btn-sec" onclick="location.reload()">🔍 Buscar otro DNI</button>
     </div>
-    ${generarConstanciaHtml(t)}`;
+    <div id="hojaConstancia">${generarConstanciaHtml(t)}</div>`;
   window.__tramiteActual = t;
+  // En pantallas angostas la hoja se muestra reducida, con la misma distribución del PDF.
+  const hoja = $("hojaConstancia");
+  hoja.style.zoom = Math.min(1, hoja.clientWidth / 718);
+  hoja.firstElementChild && (hoja.querySelector(".cst").style.maxWidth = "none");
   window.scrollTo({ top: document.getElementById("constanciaZona").offsetTop - 10, behavior:"smooth" });
 }
 
@@ -301,7 +380,13 @@ function descargarPDF(){
     return;
   }
   boton.disabled = true; boton.textContent = "Generando…";
-  html2canvas(cont, { scale:2, useCORS:true }).then(canvas => {
+  // Se dibuja en una copia de ancho fijo para que el PDF salga igual en celular y computadora.
+  const copia = document.createElement("div");
+  copia.style.cssText = "position:fixed; left:-9999px; top:0; width:720px; background:#fff";
+  copia.innerHTML = generarConstanciaHtml(window.__tramiteActual);
+  document.body.appendChild(copia);
+  html2canvas(copia, { scale:2, useCORS:true }).then(canvas => {
+    copia.remove();
     const { jsPDF } = window.jspdf;
     const img = canvas.toDataURL("image/jpeg", 0.95);
     const pdf = new jsPDF({ unit:"pt", format:"a4" });
@@ -313,6 +398,7 @@ function descargarPDF(){
     pdf.save(`constancia_${window.__tramiteActual.dni}.pdf`);
     boton.disabled = false; boton.textContent = "📥 DESCARGAR PDF";
   }).catch(() => {
+    copia.remove();
     boton.disabled = false; boton.textContent = "📥 DESCARGAR PDF";
     alert("No se pudo generar el PDF. Verifica tu conexión a internet.");
   });
