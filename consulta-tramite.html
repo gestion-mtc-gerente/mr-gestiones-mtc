@@ -180,6 +180,38 @@ const ESTADOS = {
 const EMPRESA = { nombre:"MR GESTIONES", rubro:"Gestión y asesoría de trámites", direccion:"Lima — Perú" };
 
 // ---------- Constancia en PDF (mismo diseño que la oficina genera internamente) ----------
+// El pie se edita en el sistema interno; en este mismo navegador se usa lo guardado allí.
+const ACLARACION_PIE = "No constituye documento oficial del Estado.";
+const PIE_DEFECTO = {
+  texto: EMPRESA.direccion + "\nDocumento interno de gestión emitido por " + EMPRESA.nombre + " el {fecha} a las {hora} · " + ACLARACION_PIE,
+  fuente: "arial", tamano: 9.5, negrita: false, cursiva: false
+};
+const FUENTES_PIE = {
+  arial:     ["Arial",           "Arial,Helvetica,sans-serif"],
+  verdana:   ["Verdana",         "Verdana,Geneva,sans-serif"],
+  tahoma:    ["Tahoma",          "Tahoma,Geneva,sans-serif"],
+  trebuchet: ["Trebuchet",       "'Trebuchet MS',Tahoma,sans-serif"],
+  georgia:   ["Georgia",         "Georgia,'Times New Roman',serif"],
+  times:     ["Times New Roman", "'Times New Roman',Times,serif"],
+  courier:   ["Courier (máquina de escribir)", "'Courier New',Courier,monospace"]
+};
+// La constancia siempre debe aclarar, con las palabras que se elijan, que no es un documento oficial.
+const pieValido = texto => /\bno\b[^.\n]{0,60}oficial/i.test(texto);
+function piePagina(p = pieDoc){
+  const hoy = new Date();
+  let texto = String(p.texto || PIE_DEFECTO.texto);
+  if (!pieValido(texto)) texto += "\n" + ACLARACION_PIE;
+  texto = texto.split("{fecha}").join(hoy.toLocaleDateString("es-PE"))
+               .split("{hora}").join(hoy.toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"}));
+  const familia = (FUENTES_PIE[p.fuente] || FUENTES_PIE.arial)[1];
+  const tamano = Math.min(14, Math.max(8, Number(p.tamano) || PIE_DEFECTO.tamano));
+  const lineas = texto.split("\n").map(l => escapa(l.trim())).filter(Boolean).join("<br>");
+  return `<div style="font-family:${familia};font-size:${tamano}px;font-weight:${p.negrita ? 700 : 400};font-style:${p.cursiva ? "italic" : "normal"};line-height:1.5">${lineas}</div>`;
+}
+function pieGuardado(){
+  try{ return { ...PIE_DEFECTO, ...(JSON.parse(localStorage.getItem("mtc_pie")) || {}) }; }
+  catch(_e){ return PIE_DEFECTO; }
+}
 function plantillaBase(titulo, subtitulo){
   return `<style>
   .cst{width:718px;max-width:100%;min-height:1030px;margin:0 auto;display:flex;flex-direction:column;background:#fff;color:#1f1a1a;font-family:'Segoe UI',Arial,sans-serif;font-feature-settings:normal;line-height:1.35;text-align:left;border:1px solid #D62828}
@@ -262,8 +294,7 @@ function plantillaBase(titulo, subtitulo){
         <td><div class="cst-firma-img">{{firma_2}}</div><div class="cst-linea"></div><div class="cst-nombre">{{nombre_firma_2}}</div><div class="cst-cargo">{{cargo_firma_2}}</div></td>
       </tr></table>
     </div>
-    <div class="cst-pie">{{empresa_direccion}} {{empresa_contacto}}<br>
-    Documento interno de gestión emitido por {{empresa}} el {{fecha_actual}} a las {{hora_actual}} · No constituye documento oficial del Estado.</div>
+    <div class="cst-pie">{{pie_constancia}}</div>
   </div>`;
 }
 function generarConstanciaHtml(t){
@@ -301,6 +332,7 @@ function generarConstanciaHtml(t){
     "{{fecha_fin}}": v(t.fechaFin),
     "{{fecha_actual}}": hoy.toLocaleDateString("es-PE"),
     "{{hora_actual}}": hoy.toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"}),
+    "{{pie_constancia}}": piePagina(pieGuardado()),
     "{{responsable}}": v(t.responsable),
     "{{empresa}}": escapa(EMPRESA.nombre),
     "{{empresa_rubro}}": escapa(EMPRESA.rubro),

@@ -365,6 +365,7 @@ h1.titulo-vista{font-size:21px; font-weight:700; letter-spacing:-.3px; margin-bo
 <style id="tema-rojo-blanco">
 /* Menú lateral rojo */
 aside{background:linear-gradient(180deg,#B51D1D 0%,#861212 100%); border-right:none}
+@media(min-width:821px){aside{min-height:100vh}}
 aside .logo{color:#fff; border-bottom-color:rgba(255,255,255,.22)}
 aside .seccion{color:rgba(255,255,255,.68)}
 aside button.nav{color:#fff}
@@ -1955,8 +1956,7 @@ function imprimirExp(id){
       ${[0,1].map(i => { const f = datosFirma(i, e); return `<div class="firma"><div style="height:70px;display:flex;align-items:flex-end;justify-content:center">${f.img.replace("<img ", '<img style="max-height:70px;max-width:200px" ')}</div><div class="linea"></div><b>${f.nombre}</b><br><small>${f.cargo}</small></div>`; }).join("")}
     </div>
     <div class="pie">
-      ${escapa(EMPRESA.direccion)}${EMPRESA.telefono?" · Tel. "+escapa(EMPRESA.telefono):""}${EMPRESA.correo?" · "+escapa(EMPRESA.correo):""}<br>
-      Documento interno de gestión emitido por ${escapa(EMPRESA.nombre)} el ${ahora()}. No constituye documento oficial del Estado.
+      ${piePagina()}
     </div>
   </div>
   <script>window.onload=()=>window.print()<\/script>
@@ -2008,7 +2008,8 @@ const CAMPOS = [
   ["{{cargo_firma_1}}", "Cargo en la firma 1"],
   ["{{firma_2}}", "Imagen de la firma 2"],
   ["{{nombre_firma_2}}", "Nombre en la firma 2"],
-  ["{{cargo_firma_2}}", "Cargo en la firma 2"]
+  ["{{cargo_firma_2}}", "Cargo en la firma 2"],
+  ["{{pie_constancia}}", "Texto pequeño del pie (se edita en Automatización)"]
 ];
 
 // Plantilla base (se clona para cada tipo de trámite)
@@ -2094,8 +2095,7 @@ function plantillaBase(titulo, subtitulo){
         <td><div class="cst-firma-img">{{firma_2}}</div><div class="cst-linea"></div><div class="cst-nombre">{{nombre_firma_2}}</div><div class="cst-cargo">{{cargo_firma_2}}</div></td>
       </tr></table>
     </div>
-    <div class="cst-pie">{{empresa_direccion}} {{empresa_contacto}}<br>
-    Documento interno de gestión emitido por {{empresa}} el {{fecha_actual}} a las {{hora_actual}} · No constituye documento oficial del Estado.</div>
+    <div class="cst-pie">{{pie_constancia}}</div>
   </div>`;
 }
 
@@ -2116,7 +2116,10 @@ function actualizarPlantillas(){
   const subt = { nueva:"GESTIÓN DE NUEVA LICENCIA", revalidacion:"GESTIÓN DE REVALIDACIÓN",
     recategorizacion:"GESTIÓN DE RECATEGORIZACIÓN", retenciones:"GESTIÓN DE RETENCIÓN" };
   let cambio = false;
+  // El pie fijo de versiones anteriores pasa al texto editable desde Automatización.
+  const pieFijo = /<div class="cst-pie">\{\{empresa_direccion\}\} \{\{empresa_contacto\}\}<br>\s*Documento interno de gestión emitido por \{\{empresa\}\} el \{\{fecha_actual\}\} a las \{\{hora_actual\}\} [.·] No constituye documento oficial del Estado\.<\/div>/;
   Object.entries(plantillas).forEach(([k,p]) => {
+    if (p.html && pieFijo.test(p.html)){ p.html = p.html.replace(pieFijo, '<div class="cst-pie">{{pie_constancia}}</div>'); cambio = true; }
     if (!subt[k] || !p.html || p.html.includes("cst-firmas") || !p.html.includes("Sello y firma de la oficina")) return;
     p.htmlAnterior = p.html;
     p.html = plantillaBase("CONSTANCIA DE TRÁMITE", subt[k]);
@@ -2224,6 +2227,84 @@ function tarjetaFirmas(){
   </div>`;
 }
 
+// ---------- Texto pequeño al pie de la constancia (se edita en Automatización) ----------
+const ACLARACION_PIE = "No constituye documento oficial del Estado.";
+const PIE_DEFECTO = {
+  texto: EMPRESA.direccion + "\nDocumento interno de gestión emitido por " + EMPRESA.nombre + " el {fecha} a las {hora} · " + ACLARACION_PIE,
+  fuente: "arial", tamano: 9.5, negrita: false, cursiva: false
+};
+const FUENTES_PIE = {
+  arial:     ["Arial",           "Arial,Helvetica,sans-serif"],
+  verdana:   ["Verdana",         "Verdana,Geneva,sans-serif"],
+  tahoma:    ["Tahoma",          "Tahoma,Geneva,sans-serif"],
+  trebuchet: ["Trebuchet",       "'Trebuchet MS',Tahoma,sans-serif"],
+  georgia:   ["Georgia",         "Georgia,'Times New Roman',serif"],
+  times:     ["Times New Roman", "'Times New Roman',Times,serif"],
+  courier:   ["Courier (máquina de escribir)", "'Courier New',Courier,monospace"]
+};
+// La constancia siempre debe aclarar, con las palabras que se elijan, que no es un documento oficial.
+const pieValido = texto => /\bno\b[^.\n]{0,60}oficial/i.test(texto);
+function piePagina(p = pieDoc){
+  const hoy = new Date();
+  let texto = String(p.texto || PIE_DEFECTO.texto);
+  if (!pieValido(texto)) texto += "\n" + ACLARACION_PIE;
+  texto = texto.split("{fecha}").join(hoy.toLocaleDateString("es-PE"))
+               .split("{hora}").join(hoy.toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"}));
+  const familia = (FUENTES_PIE[p.fuente] || FUENTES_PIE.arial)[1];
+  const tamano = Math.min(14, Math.max(8, Number(p.tamano) || PIE_DEFECTO.tamano));
+  const lineas = texto.split("\n").map(l => escapa(l.trim())).filter(Boolean).join("<br>");
+  return `<div style="font-family:${familia};font-size:${tamano}px;font-weight:${p.negrita ? 700 : 400};font-style:${p.cursiva ? "italic" : "normal"};line-height:1.5">${lineas}</div>`;
+}
+let pieDoc = { ...PIE_DEFECTO, ...(lee("mtc_pie", null) || {}) };
+function pieEscrito(){
+  return { texto: $("cfgPieTexto").value, fuente: $("cfgPieFuente").value, tamano: Number($("cfgPieTamano").value),
+    negrita: $("cfgPieNegrita").checked, cursiva: $("cfgPieCursiva").checked };
+}
+function previaPie(){
+  const p = pieEscrito();
+  $("piePrevia").innerHTML = piePagina(p);
+  $("pieAviso").textContent = pieValido(p.texto) ? "" : "El texto debe indicar que no es un documento oficial, por ejemplo: «Documento no oficial».";
+}
+function restaurarPie(){
+  $("cfgPieTexto").value = PIE_DEFECTO.texto;
+  $("cfgPieFuente").value = PIE_DEFECTO.fuente;
+  $("cfgPieTamano").value = PIE_DEFECTO.tamano;
+  $("cfgPieNegrita").checked = PIE_DEFECTO.negrita;
+  $("cfgPieCursiva").checked = PIE_DEFECTO.cursiva;
+  previaPie();
+}
+function guardarPie(){
+  const p = pieEscrito();
+  if (!pieValido(p.texto)) return alert("No se guardó. El texto debe indicar que no es un documento oficial, con tus palabras; por ejemplo: «Documento no oficial».");
+  pieDoc = { ...p, texto: p.texto.trim() };
+  guarda("mtc_pie", pieDoc);
+  log("Actualizó el texto al pie de la constancia");
+  alert("Texto del pie guardado. Saldrá en las próximas constancias.");
+}
+function tarjetaPie(){
+  const fuentes = Object.entries(FUENTES_PIE).map(([k,v]) => `<option value="${k}" ${pieDoc.fuente === k ? "selected" : ""}>${v[0]}</option>`).join("");
+  const tamanos = [8,9,9.5,10,11,12,13,14].map(n => `<option value="${n}" ${Number(pieDoc.tamano) === n ? "selected" : ""}>${n}</option>`).join("");
+  const marca = (id, texto, activo) => `<label style="display:flex;gap:6px;align-items:center;font-weight:600;font-size:13px">
+    <input type="checkbox" id="${id}" style="width:auto" ${activo ? "checked" : ""} onchange="previaPie()">${texto}</label>`;
+  return `<div class="card" style="max-width:520px;margin-top:16px">
+    <label style="font-size:11px;font-weight:800;color:var(--gris);letter-spacing:1px">TEXTO PEQUEÑO AL PIE DE LA CONSTANCIA (PDF)</label>
+    <p style="font-size:12.5px;color:var(--gris);margin:4px 0 12px">Edita todo el texto de la franja roja de abajo. Donde escribas {fecha} y {hora} saldrán la fecha y la hora del momento.</p>
+    <div class="form-grid">
+      <div class="full"><label>Texto completo</label><textarea id="cfgPieTexto" rows="5" maxlength="400" oninput="previaPie()">${escapa(pieDoc.texto)}</textarea></div>
+      <div><label>Tipo de letra</label><select id="cfgPieFuente" onchange="previaPie()">${fuentes}</select></div>
+      <div><label>Tamaño</label><select id="cfgPieTamano" onchange="previaPie()">${tamanos}</select></div>
+    </div>
+    <div style="display:flex;gap:18px;margin-top:12px">${marca("cfgPieNegrita","Negrita",pieDoc.negrita)}${marca("cfgPieCursiva","Cursiva",pieDoc.cursiva)}</div>
+    <label style="display:block;font-size:11px;color:var(--gris);margin:12px 0 6px">Así se verá:</label>
+    <div id="piePrevia" style="background:#D62828;color:#fff;border-radius:8px;padding:10px 14px;text-align:center;overflow-wrap:anywhere">${piePagina()}</div>
+    <p id="pieAviso" style="font-size:12px;color:var(--rojo);margin-top:8px"></p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+      <button class="btn" onclick="guardarPie()">💾 GUARDAR TEXTO</button>
+      <button class="btn-sec" onclick="restaurarPie()">Restaurar texto original</button>
+    </div>
+  </div>`;
+}
+
 // ---------- Motor: reemplaza los marcadores por los datos del cliente ----------
 function generarDocumento(e){
   const colores = { tramite:"#F77F00", aprobado:"#1B9E4B", observado:"#D62828", finalizado:"#2264D1" };
@@ -2261,6 +2342,7 @@ function generarDocumento(e){
     "{{fecha_fin}}": e.fechaFin || "—",
     "{{fecha_actual}}": hoy.toLocaleDateString("es-PE"),
     "{{hora_actual}}": hoy.toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"}),
+    "{{pie_constancia}}": piePagina(),
     "{{responsable}}": escapa(e.responsable),
     "{{empresa}}": escapa(EMPRESA.nombre),
     "{{empresa_rubro}}": escapa(EMPRESA.rubro),
@@ -3759,6 +3841,7 @@ function vistaConfig(){
         <button class="btn-sec" onclick="restaurarTextosEncabezado()">Restaurar textos originales</button>
       </div>
     </div>
+    ${tarjetaPie()}
     <div class="card" style="max-width:520px;margin-top:16px">
       <label style="font-size:11px;font-weight:800;color:var(--gris);letter-spacing:1px">CATEGORÍAS DE LICENCIA</label>
       <p style="font-size:12.5px;color:var(--gris);margin:4px 0 12px">Elige qué categorías aparecen como opciones al momento de precalificar a un cliente en el módulo de Evaluación (puede calificar para varias a la vez).</p>
@@ -3940,7 +4023,7 @@ function publicarPortal(){
   alert(`Archivo generado (${pesoMB} MB).\n\nSube 'datos-publicos.json' a la misma carpeta donde está el portal de consulta (consulta-tramite.html) para que tus clientes vean los estados actualizados y puedan descargar los documentos que subiste.`);
 }
 function exportarBackup(){
-  const data = { expedientes, usuarios, auditoria, notifs, config, plantillas, firmas, solicitudes, catalogo, cfgPap, fecha: ahora() };
+  const data = { expedientes, usuarios, auditoria, notifs, config, plantillas, firmas, pieDoc, solicitudes, catalogo, cfgPap, fecha: ahora() };
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], {type:"application/json"}));
   a.download = "backup_tramites_" + new Date().toISOString().slice(0,10) + ".json";
@@ -3959,6 +4042,7 @@ function importarBackup(inp){
       auditoria = d.auditoria || []; notifs = d.notifs || []; config = d.config || config;
       if (d.plantillas) { plantillas = d.plantillas; guarda("mtc_plantillas", plantillas); }
       if (d.firmas) { firmas = d.firmas; guarda("mtc_firmas", firmas); }
+      if (d.pieDoc) { pieDoc = d.pieDoc; guarda("mtc_pie", pieDoc); }
       if (d.solicitudes) { solicitudes = d.solicitudes; guarda("mtc_solicitudes", solicitudes); solicitudes.forEach(guardarSolicitudNube); }
       if (d.catalogo) { catalogo = d.catalogo; guarda("mtc_catalogo_v2", catalogo); guardarCatalogoNube(); }
       if (d.cfgPap) { cfgPap = d.cfgPap; guarda("mtc_cfgpap", cfgPap); }
